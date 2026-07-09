@@ -9,9 +9,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 
 from app.core.config import get_settings
 from app.routers import auth as auth_router
+from app.routers import users
+from app.routers import posts
 
 settings = get_settings()
 
@@ -26,7 +30,7 @@ async def lifespan(app_fastapi: FastAPI):
 
 app = FastAPI(
     title="DevPulse API",
-    description="Social media platform for developers — Milestone 1: Authentication",
+    description="Social media platform for developers — Milestone 2: Posts & Profiles",
     version="0.1.0",
     docs_url="/docs" if not settings.is_production else None,
     redoc_url="/redoc" if not settings.is_production else None,
@@ -48,6 +52,13 @@ app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(auth_router.router)
+app.include_router(users.router)
+app.include_router(posts.router)
+
+# Mount uploads directory for static file serving
+uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
+os.makedirs(uploads_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     smtp_from_name: str = "DevPulse"
     smtp_use_tls: bool = True
 
+# ── AWS ───────────────────────────────────────────────────────────────────
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_region: str = ""
+    aws_s3_bucket_name: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

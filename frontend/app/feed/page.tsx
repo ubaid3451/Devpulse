@@ -1,12 +1,39 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { getPosts, PostResponse } from "@/lib/api";
+import PostCard from "@/components/PostCard";
+import CreatePostModal from "@/components/CreatePostModal";
+import Link from "next/link";
 
 export default function FeedPage() {
   const router = useRouter();
   const { user, logout, isLoading } = useAuth();
+  const [posts, setPosts] = useState<PostResponse[]>([]);
+  const [loadingPosts, setLoadingPosts] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const fetchPosts = async () => {
+    setLoadingPosts(true);
+    try {
+      const data = await getPosts();
+      // Filter out "ghost" reposts whose original post has been deleted
+      const validPosts = (data || []).filter(post => !(post.repost_id && !post.original_post));
+      setPosts(validPosts);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingPosts(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isLoading && user) {
+      fetchPosts();
+    }
+  }, [isLoading, user]);
 
   async function handleLogout() {
     await logout();
@@ -33,9 +60,13 @@ export default function FeedPage() {
         <div className="flex gap-4">
           <span className="material-symbols-outlined text-primary">terminal</span>
           <span className="material-symbols-outlined text-primary">bug_report</span>
-          <div className="w-8 h-8 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center font-bold border border-outline-variant uppercase">
-            {user?.username?.[0] || "U"}
-          </div>
+          <Link href={`/profile/${user?.username}`} className="w-8 h-8 rounded-full overflow-hidden bg-primary-container text-on-primary-container flex items-center justify-center font-bold border border-outline-variant uppercase hover:brightness-110 transition-all">
+            {user?.avatar_url ? (
+              <img src={user.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+            ) : (
+              user?.username?.[0] || "U"
+            )}
+          </Link>
         </div>
       </header>
 
@@ -79,16 +110,12 @@ export default function FeedPage() {
               <span className="material-symbols-outlined">notifications</span>
               <span className="font-body-base text-body-base">Notifications</span>
             </a>
-            <a
-              className="flex items-center gap-md px-md py-sm mb-xs text-on-surface-variant hover:bg-surface-variant transition-colors rounded-sm"
-              href="#"
-            >
-              <span className="material-symbols-outlined">person</span>
-              <span className="font-body-base text-body-base">Profile</span>
-            </a>
           </nav>
           <div className="p-md">
-            <button className="w-full py-sm bg-primary-container text-on-primary-container font-bold rounded-lg hover:brightness-110 active:scale-95 transition-all">
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="w-full py-sm bg-primary-container text-on-primary-container font-bold rounded-lg hover:brightness-110 active:scale-95 transition-all"
+            >
               Post a Bug
             </button>
           </div>
@@ -115,6 +142,17 @@ export default function FeedPage() {
               <span className="font-body-base text-body-base text-left flex-1">Sign Out</span>
             </button>
           </div>
+          <footer className="mt-auto p-md border-t border-outline-variant/30 hidden md:block">
+            <div className="flex flex-wrap gap-sm text-[10px] text-on-surface-variant uppercase font-bold tracking-widest">
+              <a className="hover:text-primary" href="#">Status</a>
+              <a className="hover:text-primary" href="#">Terms</a>
+              <a className="hover:text-primary" href="#">API</a>
+              <a className="hover:text-primary" href="#">Careers</a>
+            </div>
+            <p className="text-[10px] text-on-surface-variant/50 mt-xs">
+              © 2024 DevPulse System
+            </p>
+          </footer>
         </aside>
 
         {/* Main Content Feed */}
@@ -138,6 +176,16 @@ export default function FeedPage() {
               <button className="p-2 text-on-surface-variant hover:text-primary transition-colors">
                 <span className="material-symbols-outlined">bug_report</span>
               </button>
+              <Link href={`/profile/${user?.username}`} className="flex items-center gap-2 pl-1 pr-3 py-1 rounded-full hover:bg-surface-variant transition-colors border border-outline-variant bg-surface-container-low ml-2 group">
+                <div className="w-8 h-8 rounded-full overflow-hidden bg-primary-container text-on-primary-container flex items-center justify-center font-bold text-sm border border-outline-variant">
+                  {user?.avatar_url ? (
+                     <img src={user.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                     user?.username?.[0]?.toUpperCase() || "U"
+                  )}
+                </div>
+                <span className="font-bold text-body-sm text-on-surface group-hover:text-primary transition-colors">Profile</span>
+              </Link>
             </div>
           </div>
           {/* Mobile Search Bar */}
@@ -156,260 +204,27 @@ export default function FeedPage() {
 
           {/* Feed Content */}
           <div className="p-md lg:p-lg space-y-md">
-            {/* Bug Card 1 */}
-            <article className="bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg hover:border-outline transition-all group">
-              <div className="flex justify-between items-start mb-md">
-                <div className="flex items-center gap-sm">
-                  <div className="w-10 h-10 rounded-lg overflow-hidden border border-outline-variant bg-surface-container-highest flex items-center justify-center">
-                    <span className="text-on-surface font-bold">DV</span>
-                  </div>
-                  <div>
-                    <h3 className="font-headline-md text-headline-md text-on-surface group-hover:text-primary transition-colors">
-                      React hydration error in Next.js 14
-                    </h3>
-                    <div className="flex gap-2 items-center mt-0.5">
-                      <span className="text-body-sm text-on-surface-variant">
-                        @dan_vortex • 14m ago
-                      </span>
-                      <span className="px-2 py-0.5 bg-error-container/20 text-error text-[10px] font-bold rounded uppercase tracking-wider border border-error-container/30">
-                        Urgent
-                      </span>
-                    </div>
-                  </div>
+            {loadingPosts ? (
+              <div className="flex justify-center p-8">
+                <span className="material-symbols-outlined animate-spin-slow text-primary text-4xl">progress_activity</span>
+              </div>
+            ) : posts.length === 0 ? (
+              <div className="text-center p-8 text-on-surface-variant bg-surface-container-low rounded-xl border border-outline-variant">
+                <div className="mb-4">
+                  <span className="material-symbols-outlined text-4xl text-on-surface-variant opacity-50">post_add</span>
                 </div>
-                <button className="text-on-surface-variant hover:text-on-surface">
-                  <span className="material-symbols-outlined">more_horiz</span>
-                </button>
+                <h3 className="font-headline-sm text-headline-sm text-on-surface mb-2">No posts yet</h3>
+                <p className="text-body-base">Be the first to post a bug or question!</p>
               </div>
-              <div className="bg-surface-container-highest rounded-lg p-md mb-md border border-outline-variant overflow-x-auto cursor-pointer" title="Click to copy code snippet">
-                <pre className="font-code-block text-code-block">
-                  <code className="text-on-surface-variant">
-                    <span className="text-[#ff7b72]">export default function</span>{" "}
-                    <span className="text-[#d2a8ff]">Page</span>() {"{\n"}
-                    {"  "}
-                    <span className="text-[#ff7b72]">const</span> [data, setData] ={" "}
-                    <span className="text-[#d2a8ff]">useState</span>(
-                    <span className="text-[#ff7b72]">null</span>);{"\n"}
-                    {"  "}
-                    <span className="text-[#8b949e]">
-                      {"// hydration mismatch triggered here"}
-                    </span>
-                    {"\n"}
-                    {"  "}
-                    <span className="text-[#ff7b72]">return</span> &lt;
-                    <span className="text-[#d2a8ff]">div</span>&gt;
-                    {"{typeof window !== "}
-                    <span className="text-[#a5d6ff]">&apos;undefined&apos;</span>
-                    {" ? "}
-                    <span className="text-[#a5d6ff]">&apos;Client&apos;</span>
-                    {" : "}
-                    <span className="text-[#a5d6ff]">&apos;Server&apos;</span>
-                    {"}"}
-                    &lt;/<span className="text-[#d2a8ff]">div</span>&gt;;{"\n"}
-                    {"}"}
-                  </code>
-                </pre>
-              </div>
-              <div className="flex flex-wrap gap-sm mb-lg">
-                <span className="px-2 py-1 bg-surface-container-high border border-outline-variant rounded font-code-block text-body-sm text-primary-fixed-dim">
-                  #typescript
-                </span>
-                <span className="px-2 py-1 bg-surface-container-high border border-outline-variant rounded font-code-block text-body-sm text-primary-fixed-dim">
-                  #nextjs
-                </span>
-                <span className="px-2 py-1 bg-surface-container-high border border-outline-variant rounded font-code-block text-body-sm text-primary-fixed-dim">
-                  #react
-                </span>
-              </div>
-              <div className="flex items-center justify-between pt-md border-t border-outline-variant/30">
-                <div className="flex gap-lg">
-                  <button className="flex items-center gap-xs text-on-surface-variant hover:text-primary transition-colors">
-                    <span className="material-symbols-outlined text-[18px]">forum</span>
-                    <span className="font-label-caps text-label-caps">24 Solutions</span>
-                  </button>
-                  <button className="flex items-center gap-xs text-on-surface-variant hover:text-tertiary transition-colors">
-                    <span className="material-symbols-outlined text-[18px]">bolt</span>
-                    <span className="font-label-caps text-label-caps">1.2k Rep</span>
-                  </button>
-                </div>
-                <button className="px-md py-1.5 bg-secondary-container text-on-secondary-container text-body-sm font-semibold rounded-lg hover:bg-outline-variant transition-colors">
-                  View Solutions
-                </button>
-              </div>
-            </article>
-
-            {/* Bug Card 2 */}
-            <article className="bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg hover:border-outline transition-all group">
-              <div className="flex justify-between items-start mb-md">
-                <div className="flex items-center gap-sm">
-                  <div className="w-10 h-10 rounded-lg overflow-hidden border border-outline-variant bg-surface-container-highest flex items-center justify-center">
-                    <span className="text-on-surface font-bold">NW</span>
-                  </div>
-                  <div>
-                    <h3 className="font-headline-md text-headline-md text-on-surface group-hover:text-primary transition-colors">
-                      Memory leak in WebWorker cluster
-                    </h3>
-                    <div className="flex gap-2 items-center mt-0.5">
-                      <span className="text-body-sm text-on-surface-variant">
-                        @node_wizard • 2h ago
-                      </span>
-                      <span className="px-2 py-0.5 bg-tertiary-container/20 text-tertiary text-[10px] font-bold rounded uppercase tracking-wider border border-tertiary-container/30">
-                        High Priority
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <button className="text-on-surface-variant hover:text-on-surface">
-                  <span className="material-symbols-outlined">more_horiz</span>
-                </button>
-              </div>
-              <div className="bg-surface-container-highest rounded-lg p-md mb-md border border-outline-variant overflow-x-auto cursor-pointer" title="Click to copy code snippet">
-                <pre className="font-code-block text-code-block">
-                  <code className="text-on-surface-variant">
-                    <span className="text-[#ff7b72]">while</span> (tasks.
-                    <span className="text-[#d2a8ff]">length</span>) {"{\n"}
-                    {"  "}
-                    <span className="text-[#ff7b72]">const</span> worker ={" "}
-                    <span className="text-[#ff7b72]">new</span>{" "}
-                    <span className="text-[#d2a8ff]">Worker</span>(
-                    <span className="text-[#a5d6ff]">&apos;./heavy.js&apos;</span>);{"\n"}
-                    {"  worker."}
-                    <span className="text-[#d2a8ff]">postMessage</span>
-                    {"(tasks."}
-                    <span className="text-[#d2a8ff]">shift</span>());{"\n"}
-                    {"  "}
-                    <span className="text-[#8b949e]">
-                      {"// worker is never terminated?"}
-                    </span>
-                    {"\n}"}
-                  </code>
-                </pre>
-              </div>
-              <div className="flex flex-wrap gap-sm mb-lg">
-                <span className="px-2 py-1 bg-surface-container-high border border-outline-variant rounded font-code-block text-body-sm text-primary-fixed-dim">
-                  #nodejs
-                </span>
-                <span className="px-2 py-1 bg-surface-container-high border border-outline-variant rounded font-code-block text-body-sm text-primary-fixed-dim">
-                  #webworkers
-                </span>
-              </div>
-              <div className="flex items-center justify-between pt-md border-t border-outline-variant/30">
-                <div className="flex gap-lg">
-                  <button className="flex items-center gap-xs text-on-surface-variant hover:text-primary transition-colors">
-                    <span className="material-symbols-outlined text-[18px]">forum</span>
-                    <span className="font-label-caps text-label-caps">8 Solutions</span>
-                  </button>
-                  <button className="flex items-center gap-xs text-on-surface-variant hover:text-tertiary transition-colors">
-                    <span className="material-symbols-outlined text-[18px]">bolt</span>
-                    <span className="font-label-caps text-label-caps">450 Rep</span>
-                  </button>
-                </div>
-                <button className="px-md py-1.5 bg-secondary-container text-on-secondary-container text-body-sm font-semibold rounded-lg hover:bg-outline-variant transition-colors">
-                  View Solutions
-                </button>
-              </div>
-            </article>
+            ) : (
+              posts.map(post => (
+                <PostCard key={post.id} post={post} onLikeToggle={fetchPosts} />
+              ))
+            )}
           </div>
         </main>
 
-        {/* Right Sidebar (Desktop) */}
-        <aside className="hidden lg:flex flex-col w-80 sticky top-0 h-screen p-lg bg-surface">
-          {/* Trending Tags */}
-          <section className="mb-xl">
-            <div className="flex items-center justify-between mb-md">
-              <h4 className="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest">
-                Trending Tags
-              </h4>
-              <span className="material-symbols-outlined text-primary text-[18px]">
-                trending_up
-              </span>
-            </div>
-            <div className="space-y-sm">
-              <a className="flex items-center justify-between group" href="#">
-                <span className="text-body-base font-medium text-on-surface group-hover:text-primary transition-colors">
-                  #rust-lang
-                </span>
-                <span className="text-body-sm text-on-surface-variant bg-surface-container-high px-2 py-0.5 rounded border border-outline-variant">
-                  2.4k
-                </span>
-              </a>
-              <a className="flex items-center justify-between group" href="#">
-                <span className="text-body-base font-medium text-on-surface group-hover:text-primary transition-colors">
-                  #typescript
-                </span>
-                <span className="text-body-sm text-on-surface-variant bg-surface-container-high px-2 py-0.5 rounded border border-outline-variant">
-                  1.8k
-                </span>
-              </a>
-              <a className="flex items-center justify-between group" href="#">
-                <span className="text-body-base font-medium text-on-surface group-hover:text-primary transition-colors">
-                  #docker
-                </span>
-                <span className="text-body-sm text-on-surface-variant bg-surface-container-high px-2 py-0.5 rounded border border-outline-variant">
-                  942
-                </span>
-              </a>
-              <a className="flex items-center justify-between group" href="#">
-                <span className="text-body-base font-medium text-on-surface group-hover:text-primary transition-colors">
-                  #postgresql
-                </span>
-                <span className="text-body-sm text-on-surface-variant bg-surface-container-high px-2 py-0.5 rounded border border-outline-variant">
-                  612
-                </span>
-              </a>
-            </div>
-          </section>
 
-          {/* Active Solvers */}
-          <section>
-            <div className="flex items-center justify-between mb-md">
-              <h4 className="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest">
-                Active Solvers
-              </h4>
-              <span className="material-symbols-outlined text-tertiary text-[18px]">
-                workspace_premium
-              </span>
-            </div>
-            <div className="space-y-md">
-              <div className="flex items-center gap-md">
-                <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary border border-primary/30">
-                  <span className="material-symbols-outlined text-[20px]">person</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-body-base font-bold text-on-surface truncate">
-                    Sarah Codes
-                  </p>
-                  <p className="text-body-sm text-on-surface-variant">24 solves today</p>
-                </div>
-                <div className="text-primary font-code-block text-[12px]">+140</div>
-              </div>
-              <div className="flex items-center gap-md">
-                <div className="w-8 h-8 rounded-full bg-tertiary/20 flex items-center justify-center text-tertiary border border-tertiary/30">
-                  <span className="material-symbols-outlined text-[20px]">person</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-body-base font-bold text-on-surface truncate">
-                    Dev_Shadow
-                  </p>
-                  <p className="text-body-sm text-on-surface-variant">18 solves today</p>
-                </div>
-                <div className="text-primary font-code-block text-[12px]">+95</div>
-              </div>
-            </div>
-          </section>
-
-          <footer className="mt-auto pt-lg border-t border-outline-variant/30">
-            <div className="flex flex-wrap gap-sm text-[10px] text-on-surface-variant uppercase font-bold tracking-widest">
-              <a className="hover:text-primary" href="#">Status</a>
-              <a className="hover:text-primary" href="#">Terms</a>
-              <a className="hover:text-primary" href="#">API</a>
-              <a className="hover:text-primary" href="#">Careers</a>
-            </div>
-            <p className="text-[10px] text-on-surface-variant/50 mt-xs">
-              © 2024 DevPulse System
-            </p>
-          </footer>
-        </aside>
       </div>
 
       {/* Bottom Nav Bar (Mobile Only) */}
@@ -445,9 +260,19 @@ export default function FeedPage() {
       </nav>
 
       {/* FAB (Mobile only) */}
-      <button className="md:hidden fixed bottom-20 right-6 w-14 h-14 bg-primary-container text-on-primary-container rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-transform z-50">
+      <button
+        onClick={() => setIsModalOpen(true)}
+        className="md:hidden fixed bottom-20 right-6 w-14 h-14 bg-primary-container text-on-primary-container rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-transform z-50"
+      >
         <span className="material-symbols-outlined text-[28px]">add</span>
       </button>
+
+      {isModalOpen && (
+        <CreatePostModal
+          onClose={() => setIsModalOpen(false)}
+          onSuccess={fetchPosts}
+        />
+      )}
     </div>
   );
 }

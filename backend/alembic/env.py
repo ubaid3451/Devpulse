@@ -1,8 +1,12 @@
 import os
 from logging.config import fileConfig
 
+from dotenv import load_dotenv
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+
+# Load .env so DATABASE_URL is available to os.getenv() below
+load_dotenv()
 
 # Load the alembic.ini logging config
 config = context.config
@@ -16,7 +20,12 @@ import app.models  # noqa: F401 — side-effect: registers all model classes
 target_metadata = Base.metadata
 
 # ── Override sqlalchemy.url with the DATABASE_URL env var ─────────────────────
-database_url = os.getenv("DATABASE_URL", "postgresql://<PLACEHOLDER>:<PLACEHOLDER>@localhost:5432/<PLACEHOLDER>")
+database_url = os.getenv("DATABASE_URL")
+if not database_url:
+    raise RuntimeError(
+        "DATABASE_URL is not set. Make sure a .env file exists in the backend/ "
+        "directory with a valid DATABASE_URL value."
+    )
 config.set_main_option("sqlalchemy.url", database_url)
 
 
@@ -51,4 +60,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-
