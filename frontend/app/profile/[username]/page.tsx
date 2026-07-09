@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { getUserProfile, UserProfileResponse, getPosts, PostResponse } from "@/lib/api";
+import { getUserProfile, UserProfileResponse, getPosts, PostResponse, toggleFollow } from "@/lib/api";
 import PostCard from "@/components/PostCard";
 
 export default function UserProfilePage({ params }: { params: { username: string } }) {
@@ -32,6 +32,17 @@ export default function UserProfilePage({ params }: { params: { username: string
   useEffect(() => {
     fetchProfileData();
   }, [params.username]);
+
+  const handleToggleFollow = async () => {
+    if (!profile) return;
+    try {
+      await toggleFollow(profile.username);
+      // Refresh profile data to get updated counts and status
+      await fetchProfileData();
+    } catch (e: any) {
+      alert(e.message || "Failed to toggle follow");
+    }
+  };
 
   if (loading) {
     return (
@@ -85,20 +96,48 @@ export default function UserProfilePage({ params }: { params: { username: string
           </div>
           
           <div className="flex gap-4 text-body-sm text-on-surface-variant mb-8">
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1 font-bold text-on-surface">
+              {profile.followers_count ?? 0} <span className="font-normal text-on-surface-variant">Followers</span>
+            </span>
+            <span className="flex items-center gap-1 font-bold text-on-surface">
+              {profile.following_count ?? 0} <span className="font-normal text-on-surface-variant">Following</span>
+            </span>
+            <span className="flex items-center gap-1 ml-4">
               <span className="material-symbols-outlined text-[18px]">calendar_today</span>
               Joined {new Date(profile.created_at).toLocaleDateString()}
             </span>
           </div>
 
-          {isOwnProfile && (
-            <button 
-              onClick={() => router.push("/profile")}
-              className="px-6 py-2 bg-secondary-container text-on-secondary-container font-bold rounded-lg hover:brightness-110 transition-colors"
-            >
-              Edit Profile
-            </button>
-          )}
+          <div className="flex gap-4">
+            {isOwnProfile ? (
+              <button 
+                onClick={() => router.push("/profile")}
+                className="px-6 py-2 bg-secondary-container text-on-secondary-container font-bold rounded-lg hover:brightness-110 transition-colors"
+              >
+                Edit Profile
+              </button>
+            ) : (
+              <>
+                <button 
+                  onClick={handleToggleFollow}
+                  className={`px-6 py-2 font-bold rounded-lg transition-colors ${
+                    profile.is_following 
+                      ? "bg-surface-variant text-on-surface hover:bg-surface-container-high" 
+                      : "bg-primary text-on-primary hover:brightness-110"
+                  }`}
+                >
+                  {profile.is_following ? "Unfollow" : "Follow"}
+                </button>
+                <button 
+                  onClick={() => router.push(`/chat?user=${profile.username}`)}
+                  className="px-6 py-2 bg-secondary-container text-on-secondary-container font-bold rounded-lg hover:brightness-110 transition-colors flex items-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-[18px]">chat</span>
+                  Message
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="mt-12">

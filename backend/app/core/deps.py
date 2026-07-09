@@ -52,6 +52,28 @@ def get_current_user(
 
     return user
 
+async def get_current_user_ws(token: str, db: Session) -> User:
+    """Authenticates a WebSocket connection using a JWT token string."""
+    try:
+        payload = decode_token(token)
+    except JWTError:
+        raise Exception("Invalid token")
+        
+    if payload.get("type") != "access":
+        raise Exception("Invalid token type")
+        
+    user_id: str | None = payload.get("sub")
+    if user_id is None:
+        raise Exception("User ID not found in token")
+        
+    result = db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if user is None or not user.is_active:
+        raise Exception("User not found or inactive")
+        
+    return user
+
 
 # ── Type aliases for cleaner route signatures ──────────────────────────────────
 CurrentUser = Annotated[User, Depends(get_current_user)]

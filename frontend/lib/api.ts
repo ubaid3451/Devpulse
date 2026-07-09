@@ -21,9 +21,9 @@ async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const headers: HeadersInit = { ...options.headers };
+  const headers = new Headers(options.headers);
   if (!(options.body instanceof FormData)) {
-    headers["Content-Type"] = "application/json";
+    headers.set("Content-Type", "application/json");
   }
 
   const res = await fetch(`${API_URL}${path}`, {
@@ -147,6 +147,29 @@ export interface UserProfileResponse {
   avatar_url: string | null;
   bio: string | null;
   created_at: string;
+  followers_count?: number;
+  following_count?: number;
+  is_following?: boolean;
+}
+
+export interface ConversationResponse {
+  id: string;
+  username: string;
+  full_name: string;
+  avatar_url: string | null;
+  last_message: string;
+  last_message_at: string;
+}
+
+export interface ChatMessageResponse {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  content: string;
+  image_url?: string | null;
+  is_read: boolean;
+  created_at: string;
+  reactions: { user_id: string; emoji: string }[];
 }
 
 // ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -165,3 +188,20 @@ export const deletePost = (postId: string) => apiDelete(`/posts/${postId}`);
 export const getUserProfile = (username: string) => apiGet<UserProfileResponse>(`/users/${username}`);
 export const updateProfile = (data: { bio?: string, avatar_url?: string, full_name?: string }) => apiPatch<UserProfileResponse>("/users/me/profile", data);
 export const uploadAvatar = (data: FormData) => apiFetch<{ avatar_url: string }>("/users/me/avatar", { method: "POST", body: data });
+
+export const toggleFollow = (username: string) => apiPost<{ status: string }>(`/users/${username}/follow`);
+export const getFollowers = (username: string) => apiGet<AuthorResponse[]>(`/users/${username}/followers`);
+export const getFollowing = (username: string) => apiGet<AuthorResponse[]>(`/users/${username}/following`);
+
+export const getConversations = () => apiGet<ConversationResponse[]>("/chat/conversations");
+export const getChatHistory = (username: string) => apiGet<ChatMessageResponse[]>(`/chat/${username}`);
+export const searchUsers = (q: string) => apiGet<AuthorResponse[]>(`/users/search?q=${encodeURIComponent(q)}`);
+export const getOnlineUsers = () => apiGet<string[]>("/chat/online");
+export const uploadChatImage = async (file: File) => {
+  const formData = new FormData();
+  formData.append("image", file);
+  return apiFetch<{ image_url: string }>("/chat/upload_image", {
+    method: "POST",
+    body: formData,
+  });
+};

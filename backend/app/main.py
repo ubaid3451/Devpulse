@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.routers import auth as auth_router
 from app.routers import users
 from app.routers import posts
+from app.routers import chat
 
 settings = get_settings()
 
@@ -54,6 +55,7 @@ app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 app.include_router(auth_router.router)
 app.include_router(users.router)
 app.include_router(posts.router)
+app.include_router(chat.router)
 
 # Mount uploads directory for static file serving
 uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")

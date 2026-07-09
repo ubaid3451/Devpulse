@@ -10,6 +10,8 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.post import Post, Comment, Like
+    from app.models.follow import Follow
+    from app.models.message import Message
 
 
 class User(Base):
@@ -72,6 +74,36 @@ class User(Base):
     posts: Mapped[list["Post"]] = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     comments: Mapped[list["Comment"]] = relationship("Comment", back_populates="author", cascade="all, delete-orphan")
     likes: Mapped[list["Like"]] = relationship("Like", back_populates="user", cascade="all, delete-orphan")
+
+    # Social Graph relationships
+    following: Mapped[list["User"]] = relationship(
+        "User",
+        secondary="follows",
+        primaryjoin="User.id == Follow.follower_id",
+        secondaryjoin="User.id == Follow.following_id",
+        back_populates="followers",
+    )
+    followers: Mapped[list["User"]] = relationship(
+        "User",
+        secondary="follows",
+        primaryjoin="User.id == Follow.following_id",
+        secondaryjoin="User.id == Follow.follower_id",
+        back_populates="following",
+    )
+
+    # Messaging relationships
+    messages_sent: Mapped[list["Message"]] = relationship(
+        "Message",
+        foreign_keys="[Message.sender_id]",
+        back_populates="sender",
+        cascade="all, delete-orphan"
+    )
+    messages_received: Mapped[list["Message"]] = relationship(
+        "Message",
+        foreign_keys="[Message.receiver_id]",
+        back_populates="receiver",
+        cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<User id={self.id!r} email={self.email!r} role={self.role!r}>"
