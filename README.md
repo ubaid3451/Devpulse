@@ -11,7 +11,7 @@
 | # | Weeks | Theme | Status |
 |---|-------|-------|--------|
 | 1 | 1–2 | Foundation & Authentication | ✅ Complete |
-| 2 | 3–4 | Posts, Engagement & Profiles | 🔲 Upcoming |
+| 2 | 3–4 | Posts, Engagement & Profiles | ✅ Complete |
 | 3 | 5–6 | Social Graph & Chat | 🔲 Upcoming |
 | 4 | 7–8 | Super Admin & Deployment | 🔲 Upcoming |
 
