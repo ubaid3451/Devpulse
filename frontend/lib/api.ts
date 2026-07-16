@@ -152,24 +152,44 @@ export interface UserProfileResponse {
   is_following?: boolean;
 }
 
-export interface ConversationResponse {
+// ── Chat types (conversation-based, group-chat capable) ─────────────────────────
+
+export interface ConversationParticipantInfo {
   id: string;
   username: string;
   full_name: string;
   avatar_url: string | null;
-  last_message: string;
+}
+
+export interface ConversationResponse {
+  conversation_id: string;
+  is_group: boolean;
+  name: string | null; // group name; null for 1-on-1
+  participants: ConversationParticipantInfo[]; // everyone except current user
+  last_message: string | null;
   last_message_at: string;
 }
 
 export interface ChatMessageResponse {
   id: string;
+  conversation_id: string;
   sender_id: string;
-  receiver_id: string;
   content: string;
   image_url?: string | null;
   is_read: boolean;
   created_at: string;
   reactions: { user_id: string; emoji: string }[];
+}
+
+export interface StartDirectConversationResponse {
+  conversation_id: string;
+  is_group: boolean;
+}
+
+export interface CreateGroupConversationResponse {
+  conversation_id: string;
+  is_group: boolean;
+  name: string;
 }
 
 // ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -194,7 +214,12 @@ export const getFollowers = (username: string) => apiGet<AuthorResponse[]>(`/use
 export const getFollowing = (username: string) => apiGet<AuthorResponse[]>(`/users/${username}/following`);
 
 export const getConversations = () => apiGet<ConversationResponse[]>("/chat/conversations");
-export const getChatHistory = (username: string) => apiGet<ChatMessageResponse[]>(`/chat/${username}`);
+export const getChatHistory = (conversationId: string) =>
+  apiGet<ChatMessageResponse[]>(`/chat/${conversationId}`);
+export const startDirectConversation = (username: string) =>
+  apiPost<StartDirectConversationResponse>("/chat/conversations/direct", { username });
+export const createGroupConversation = (name: string, usernames: string[]) =>
+  apiPost<CreateGroupConversationResponse>("/chat/conversations/group", { name, usernames });
 export const searchUsers = (q: string) => apiGet<AuthorResponse[]>(`/users/search?q=${encodeURIComponent(q)}`);
 export const getOnlineUsers = () => apiGet<string[]>("/chat/online");
 export const uploadChatImage = async (file: File) => {

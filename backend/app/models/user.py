@@ -92,16 +92,14 @@ class User(Base):
     )
 
     # Messaging relationships
+    # NOTE: messages_received was removed — Message no longer has a single
+    # receiver_id now that conversations support multiple participants (group chats).
+    # To get "messages a user has received", query via their ConversationParticipant
+    # rows instead (see app.services.chat_history.get_chat_history).
     messages_sent: Mapped[list["Message"]] = relationship(
         "Message",
         foreign_keys="[Message.sender_id]",
         back_populates="sender",
-        cascade="all, delete-orphan"
-    )
-    messages_received: Mapped[list["Message"]] = relationship(
-        "Message",
-        foreign_keys="[Message.receiver_id]",
-        back_populates="receiver",
         cascade="all, delete-orphan"
     )
 

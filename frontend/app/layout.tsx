@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
+import { ChatSocketProvider } from "@/lib/chat-socket-context";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -41,7 +42,9 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-background text-on-background font-body-base antialiased min-h-screen flex flex-col">
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <ChatSocketProvider>{children}</ChatSocketProvider>
+        </AuthProvider>
       </body>
     </html>
   );
