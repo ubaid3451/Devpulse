@@ -7,7 +7,7 @@ class AuthorResponse(BaseModel):
     username: str
     full_name: str
     avatar_url: str | None = None
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -62,10 +62,11 @@ class PostResponse(PostBase):
     author: AuthorResponse
     likes_count: int = 0
     comments_count: int = 0
-    is_liked: bool = False # Resolved at runtime based on current user
+    is_liked: bool = False  # Resolved at runtime based on current user
     is_reposted: bool = False
     repost_id: str | None = None
     original_post: "PostResponse | None" = None
+    is_archived: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

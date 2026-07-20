@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { PostResponse, toggleLike, repostPost, deletePost } from "@/lib/api";
+import { PostResponse, toggleLike, repostPost, deletePost, archivePost, unarchivePost } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
 function timeAgo(dateString: string) {
@@ -22,13 +22,23 @@ function timeAgo(dateString: string) {
   return `${Math.floor(diffInMonths / 12)}y ago`;
 }
 
-export default function PostCard({ post, onLikeToggle }: { post: PostResponse; onLikeToggle?: () => void }) {
+interface PostCardProps {
+  post: PostResponse;
+  onLikeToggle?: () => void;
+  onEdit?: (post: PostResponse) => void; // opens the edit modal in the parent
+}
+
+export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) {
   const { user } = useAuth();
   const displayPost = post.original_post || post;
-  
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+
   const isReposter = user?.id === post.author_id;
   const isOriginalAuthor = user?.id === displayPost.author_id;
-  const canDelete = isReposter || isOriginalAuthor;
+  const canManage = isReposter || isOriginalAuthor;
+  // Editing/archiving only makes sense on the original post, not on a repost wrapper
+  const canEditOrArchive = isOriginalAuthor && !post.original_post;
 
   const handleLike = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -48,9 +58,8 @@ export default function PostCard({ post, onLikeToggle }: { post: PostResponse; o
     e.stopPropagation();
     try {
       await repostPost(displayPost.id);
-      // We could trigger a feed refresh if needed, for now just an alert or rely on parent
       if (onLikeToggle) {
-         onLikeToggle();
+        onLikeToggle();
       }
     } catch (err) {
       console.error("Failed to repost", err);
@@ -60,30 +69,65 @@ export default function PostCard({ post, onLikeToggle }: { post: PostResponse; o
   const handleDelete = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    setMenuOpen(false);
     try {
       // If the user is the reposter, delete the repost.
       // If the user is the original author (but not the reposter), delete the original post.
       const idToDelete = isReposter ? post.id : displayPost.id;
       await deletePost(idToDelete);
       if (onLikeToggle) {
-         onLikeToggle();
+        onLikeToggle();
       }
     } catch (err) {
       console.error("Failed to delete post", err);
     }
   };
 
+  const handleEdit = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuOpen(false);
+    onEdit?.(displayPost);
+  };
+
+  const handleToggleArchive = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuOpen(false);
+    setIsArchiving(true);
+    try {
+      if (displayPost.is_archived) {
+        await unarchivePost(displayPost.id);
+      } else {
+        await archivePost(displayPost.id);
+      }
+      if (onLikeToggle) {
+        onLikeToggle(); // reuse as a generic "refresh" callback
+      }
+    } catch (err) {
+      console.error("Failed to toggle archive state", err);
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
   const formattedTime = timeAgo(post.created_at);
-  
+
   const avatarInitials = (displayPost.author.full_name?.substring(0, 2) || displayPost.author.username.substring(0, 2)).toUpperCase();
 
   return (
     <Link href={`/posts/${post.id}`}>
-      <article className="bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg hover:border-outline transition-all group block">
+      <article className={`bg-surface-container-low border rounded-xl p-md lg:p-lg hover:border-outline transition-all group block ${displayPost.is_archived ? "border-dashed border-outline-variant/60 opacity-70" : "border-outline-variant"}`}>
         {post.original_post && (
           <div className="flex items-center gap-xs text-on-surface-variant text-body-sm mb-sm px-2 font-medium">
             <span className="material-symbols-outlined text-[16px]">repeat</span>
             <span>Reposted by @{post.author.username}</span>
+          </div>
+        )}
+        {displayPost.is_archived && (
+          <div className="flex items-center gap-xs text-on-surface-variant text-body-sm mb-sm px-2 font-medium">
+            <span className="material-symbols-outlined text-[16px]">archive</span>
+            <span>Archived — only visible to you</span>
           </div>
         )}
         <div className="flex justify-between items-start mb-md">
@@ -112,17 +156,64 @@ export default function PostCard({ post, onLikeToggle }: { post: PostResponse; o
               </div>
             </div>
           </div>
-          {canDelete ? (
-            <button className="text-on-surface-variant hover:text-error transition-colors" onClick={handleDelete} title="Delete Post">
-              <span className="material-symbols-outlined">delete</span>
-            </button>
+
+          {canManage ? (
+            <div className="relative">
+              <button
+                className="text-on-surface-variant hover:text-on-surface transition-colors"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setMenuOpen((v) => !v);
+                }}
+                title="Post options"
+              >
+                <span className="material-symbols-outlined">more_horiz</span>
+              </button>
+
+              {menuOpen && (
+                <div
+                  className="absolute right-0 mt-1 w-44 bg-surface-container-lowest border border-outline-variant rounded-lg shadow-xl z-10 overflow-hidden"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {canEditOrArchive && (
+                    <button
+                      onClick={handleEdit}
+                      className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-on-surface hover:bg-surface-variant/40 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">edit</span>
+                      Edit
+                    </button>
+                  )}
+                  {canEditOrArchive && (
+                    <button
+                      onClick={handleToggleArchive}
+                      disabled={isArchiving}
+                      className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-on-surface hover:bg-surface-variant/40 transition-colors disabled:opacity-50"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">
+                        {displayPost.is_archived ? "unarchive" : "archive"}
+                      </span>
+                      {displayPost.is_archived ? "Unarchive" : "Archive"}
+                    </button>
+                  )}
+                  <button
+                    onClick={handleDelete}
+                    className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-error hover:bg-error-container/20 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">delete</span>
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
           ) : (
             <button className="text-on-surface-variant hover:text-on-surface" onClick={(e) => e.preventDefault()}>
               <span className="material-symbols-outlined">more_horiz</span>
             </button>
           )}
         </div>
-        
+
         {displayPost.content && (
         <div className="bg-surface-container-highest rounded-lg p-md mb-md border border-outline-variant overflow-x-auto">
           <pre className="font-code-block text-code-block">
@@ -138,21 +229,21 @@ export default function PostCard({ post, onLikeToggle }: { post: PostResponse; o
             <img src={displayPost.image_url} alt="Post image" className="w-full max-h-[500px] object-contain" />
           </div>
         )}
-        
+
         <div className="flex items-center justify-between pt-md border-t border-outline-variant/30">
           <div className="flex gap-lg">
             <div className="flex items-center gap-xs text-on-surface-variant group-hover:text-primary transition-colors">
               <span className="material-symbols-outlined text-[18px]">forum</span>
               <span className="font-label-caps text-label-caps">{post.comments_count} Comments</span>
             </div>
-            <button 
+            <button
               onClick={handleRepost}
               className={`flex items-center gap-xs transition-colors ${displayPost.is_reposted ? 'text-[#00b894]' : 'text-on-surface-variant hover:text-[#00b894]'}`}
             >
               <span className="material-symbols-outlined text-[18px]">repeat</span>
               <span className="font-label-caps text-label-caps">Repost</span>
             </button>
-            <button 
+            <button
               onClick={handleLike}
               className={`flex items-center gap-xs transition-colors ${displayPost.is_liked ? 'text-[#ff4757]' : 'text-on-surface-variant hover:text-[#ff4757]'}`}
             >

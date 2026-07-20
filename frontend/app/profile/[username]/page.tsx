@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getUserProfile, UserProfileResponse, getPosts, PostResponse, toggleFollow } from "@/lib/api";
 import PostCard from "@/components/PostCard";
+import CreatePostModal from "@/components/CreatePostModal";
 
 export default function UserProfilePage({ params }: { params: { username: string } }) {
   const router = useRouter();
@@ -13,15 +14,29 @@ export default function UserProfilePage({ params }: { params: { username: string
   const [posts, setPosts] = useState<PostResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState<"posts" | "archived">("posts");
+  const [editingPost, setEditingPost] = useState<PostResponse | null>(null);
 
-  const fetchProfileData = async () => {
+  const isOwnProfile = currentUser?.username === params.username;
+
+  const fetchProfileData = async (tab: "posts" | "archived" = activeTab) => {
     try {
       const [profileData, postsData] = await Promise.all([
         getUserProfile(params.username),
-        getPosts(params.username)
+        // Archived posts are only ever fetched for your own profile —
+        // getPosts silently ignores include_archived for other users' profiles
+        // on the backend, but we also gate it here for clarity.
+        getPosts(params.username, isOwnProfile && tab === "archived"),
       ]);
       setProfile(profileData);
-      setPosts(postsData);
+      // When viewing "archived", only keep archived posts; when viewing "posts",
+      // only keep non-archived ones (the backend already excludes archived by
+      // default, but this keeps the two tabs strictly separate either way).
+      const filtered =
+        tab === "archived"
+          ? postsData.filter((p) => p.is_archived)
+          : postsData.filter((p) => !p.is_archived);
+      setPosts(filtered);
     } catch (e: any) {
       setError(e.message || "Failed to load profile");
     } finally {
@@ -30,14 +45,15 @@ export default function UserProfilePage({ params }: { params: { username: string
   };
 
   useEffect(() => {
-    fetchProfileData();
-  }, [params.username]);
+    setLoading(true);
+    fetchProfileData(activeTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.username, activeTab]);
 
   const handleToggleFollow = async () => {
     if (!profile) return;
     try {
       await toggleFollow(profile.username);
-      // Refresh profile data to get updated counts and status
       await fetchProfileData();
     } catch (e: any) {
       alert(e.message || "Failed to toggle follow");
@@ -63,8 +79,6 @@ export default function UserProfilePage({ params }: { params: { username: string
     );
   }
 
-  const isOwnProfile = currentUser?.username === profile.username;
-
   return (
     <div className="bg-surface text-on-surface min-h-screen">
       <header className="flex items-center w-full px-md h-16 sticky top-0 z-50 bg-surface border-b border-outline-variant">
@@ -85,16 +99,16 @@ export default function UserProfilePage({ params }: { params: { username: string
               <span className="text-on-surface font-bold text-4xl">{(profile.full_name?.substring(0, 2) || profile.username.substring(0, 2)).toUpperCase()}</span>
             )}
           </div>
-          
+
           <h1 className="text-display-sm font-bold text-on-surface mb-2">{profile.full_name}</h1>
           <p className="text-headline-sm text-primary mb-6">@{profile.username}</p>
-          
+
           <div className="max-w-lg bg-surface-container-lowest rounded-lg p-md border border-outline-variant w-full mb-8">
             <p className="text-body-lg text-on-surface-variant whitespace-pre-wrap">
               {profile.bio || "This user hasn't added a bio yet."}
             </p>
           </div>
-          
+
           <div className="flex gap-4 text-body-sm text-on-surface-variant mb-8">
             <span className="flex items-center gap-1 font-bold text-on-surface">
               {profile.followers_count ?? 0} <span className="font-normal text-on-surface-variant">Followers</span>
@@ -110,7 +124,7 @@ export default function UserProfilePage({ params }: { params: { username: string
 
           <div className="flex gap-4">
             {isOwnProfile ? (
-              <button 
+              <button
                 onClick={() => router.push("/profile")}
                 className="px-6 py-2 bg-secondary-container text-on-secondary-container font-bold rounded-lg hover:brightness-110 transition-colors"
               >
@@ -118,17 +132,17 @@ export default function UserProfilePage({ params }: { params: { username: string
               </button>
             ) : (
               <>
-                <button 
+                <button
                   onClick={handleToggleFollow}
                   className={`px-6 py-2 font-bold rounded-lg transition-colors ${
-                    profile.is_following 
-                      ? "bg-surface-variant text-on-surface hover:bg-surface-container-high" 
+                    profile.is_following
+                      ? "bg-surface-variant text-on-surface hover:bg-surface-container-high"
                       : "bg-primary text-on-primary hover:brightness-110"
                   }`}
                 >
                   {profile.is_following ? "Unfollow" : "Follow"}
                 </button>
-                <button 
+                <button
                   onClick={() => router.push(`/chat?user=${profile.username}`)}
                   className="px-6 py-2 bg-secondary-container text-on-secondary-container font-bold rounded-lg hover:brightness-110 transition-colors flex items-center gap-2"
                 >
@@ -141,25 +155,72 @@ export default function UserProfilePage({ params }: { params: { username: string
         </div>
 
         <div className="mt-12">
-          <h2 className="text-title-lg font-bold text-on-surface mb-6 border-b border-outline-variant pb-2">Posts by @{profile.username}</h2>
-          
+          <div className="flex items-center justify-between border-b border-outline-variant mb-6">
+            <div className="flex gap-1">
+              <button
+                onClick={() => setActiveTab("posts")}
+                className={`px-4 py-2 text-title-lg font-bold border-b-2 -mb-px transition-colors ${
+                  activeTab === "posts"
+                    ? "border-primary text-on-surface"
+                    : "border-transparent text-on-surface-variant hover:text-on-surface"
+                }`}
+              >
+                Posts
+              </button>
+              {isOwnProfile && (
+                <button
+                  onClick={() => setActiveTab("archived")}
+                  className={`px-4 py-2 text-title-lg font-bold border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${
+                    activeTab === "archived"
+                      ? "border-primary text-on-surface"
+                      : "border-transparent text-on-surface-variant hover:text-on-surface"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[18px]">archive</span>
+                  Archived
+                </button>
+              )}
+            </div>
+          </div>
+
           {posts.length === 0 ? (
             <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-xl text-center">
-              <span className="material-symbols-outlined text-4xl text-on-surface-variant mb-2">post_add</span>
-              <h3 className="text-title-md font-bold text-on-surface mb-1">No posts yet</h3>
+              <span className="material-symbols-outlined text-4xl text-on-surface-variant mb-2">
+                {activeTab === "archived" ? "archive" : "post_add"}
+              </span>
+              <h3 className="text-title-md font-bold text-on-surface mb-1">
+                {activeTab === "archived" ? "No archived posts" : "No posts yet"}
+              </h3>
               <p className="text-body-md text-on-surface-variant">
-                {isOwnProfile ? "You haven't" : `@${profile.username} hasn't`} posted anything.
+                {activeTab === "archived"
+                  ? "Posts you archive will show up here."
+                  : isOwnProfile
+                  ? "You haven't posted anything."
+                  : `@${profile.username} hasn't posted anything.`}
               </p>
             </div>
           ) : (
             <div className="space-y-6">
-              {posts.map(post => (
-                <PostCard key={post.id} post={post} onLikeToggle={fetchProfileData} />
+              {posts.map((post) => (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  onLikeToggle={() => fetchProfileData(activeTab)}
+                  onEdit={setEditingPost}
+                />
               ))}
             </div>
           )}
         </div>
       </main>
+
+      {editingPost && (
+        <CreatePostModal
+          editingPost={editingPost}
+          onClose={() => setEditingPost(null)}
+          onSuccess={() => fetchProfileData(activeTab)}
+        />
+      )}
     </div>
   );
 }

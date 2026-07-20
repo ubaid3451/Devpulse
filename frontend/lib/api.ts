@@ -134,6 +134,7 @@ export interface PostResponse {
   repost_id: string | null;
   original_post: PostResponse | null;
   image_url: string | null;
+  is_archived: boolean;
 }
 
 export interface PostDetailResponse extends PostResponse {
@@ -194,12 +195,19 @@ export interface CreateGroupConversationResponse {
 
 // ── Endpoints ──────────────────────────────────────────────────────────────────
 
-export const getPosts = (username?: string) => {
-  const url = username ? `/posts?username=${encodeURIComponent(username)}` : "/posts";
-  return apiGet<PostResponse[]>(url);
+export const getPosts = (username?: string, includeArchived?: boolean) => {
+  const params = new URLSearchParams();
+  if (username) params.set("username", username);
+  if (includeArchived) params.set("include_archived", "true");
+  const qs = params.toString();
+  return apiGet<PostResponse[]>(`/posts${qs ? `?${qs}` : ""}`);
 };
 export const getPost = (id: string) => apiGet<PostDetailResponse>(`/posts/${id}`);
 export const createPost = (data: FormData) => apiFetch<PostResponse>("/posts", { method: "POST", body: data });
+export const updatePost = (postId: string, data: { title?: string; content?: string }) =>
+  apiPut<PostResponse>(`/posts/${postId}`, data);
+export const archivePost = (postId: string) => apiPost<PostResponse>(`/posts/${postId}/archive`);
+export const unarchivePost = (postId: string) => apiPost<PostResponse>(`/posts/${postId}/unarchive`);
 export const toggleLike = (postId: string) => apiPost<{ liked: boolean }>(`/posts/${postId}/like`);
 export const addComment = (postId: string, content: string) => apiPost<CommentResponse>(`/posts/${postId}/comments`, { content });
 export const repostPost = (postId: string) => apiPost<{ reposted: boolean }>(`/posts/${postId}/repost`);

@@ -1,7 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
-import os
-import uuid
-import shutil
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
@@ -10,6 +7,7 @@ from app.core.deps import CurrentUser
 from app.models.user import User
 from app.models.follow import Follow
 from app.schemas.user_profile import UserProfileUpdate
+from app.services import cloudinary_service
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -20,14 +18,14 @@ def search_users(
 ):
     if not q or len(q.strip()) < 1:
         return []
-    
+
     term = f"%{q.strip().lower()}%"
     users = db.execute(
         select(User).where(
             func.lower(User.username).like(term) | func.lower(User.full_name).like(term)
         ).limit(10)
     ).scalars().all()
-    
+
     return [
         {
             "id": u.id,
@@ -47,17 +45,17 @@ def get_user_profile(
     user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-        
+
     followers_count = db.scalar(select(func.count()).select_from(Follow).where(Follow.following_id == user.id)) or 0
     following_count = db.scalar(select(func.count()).select_from(Follow).where(Follow.follower_id == user.id)) or 0
-    
+
     is_following = False
     if current_user:
         follow_record = db.execute(
             select(Follow).where(Follow.follower_id == current_user.id, Follow.following_id == user.id)
         ).scalar_one_or_none()
         is_following = follow_record is not None
-        
+
     return {
         "id": user.id,
         "username": user.username,
@@ -83,10 +81,10 @@ def update_profile(
         current_user.avatar_url = profile_in.avatar_url
     if profile_in.full_name is not None:
         current_user.full_name = profile_in.full_name
-        
+
     db.commit()
     db.refresh(current_user)
-    
+
     return {
         "id": current_user.id,
         "username": current_user.username,
@@ -103,22 +101,18 @@ def upload_avatar(
     image: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    uploads_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
-    os.makedirs(uploads_dir, exist_ok=True)
-    
-    ext = os.path.splitext(image.filename)[1] if image.filename else ""
-    filename = f"{uuid.uuid4().hex}{ext}"
-    filepath = os.path.join(uploads_dir, filename)
-    
-    with open(filepath, "wb") as buffer:
-        shutil.copyfileobj(image.file, buffer)
-        
-    image_url = f"http://localhost:8000/uploads/{filename}"
-    
+    try:
+        image_url = cloudinary_service.upload_avatar_image(image, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        # Cloudinary/network error — don't leak internal details to the client
+        raise HTTPException(status_code=502, detail="Avatar upload failed. Please try again.")
+
     current_user.avatar_url = image_url
     db.commit()
     db.refresh(current_user)
-    
+
     return {
         "avatar_url": image_url
     }
@@ -131,15 +125,15 @@ def toggle_follow(
 ):
     if current_user.username == username:
         raise HTTPException(status_code=400, detail="You cannot follow yourself")
-        
+
     target_user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
-        
+
     existing_follow = db.execute(
         select(Follow).where(Follow.follower_id == current_user.id, Follow.following_id == target_user.id)
     ).scalar_one_or_none()
-    
+
     if existing_follow:
         db.delete(existing_follow)
         db.commit()
@@ -158,11 +152,11 @@ def get_followers(
     target_user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
-        
+
     followers = db.execute(
         select(User).join(Follow, Follow.follower_id == User.id).where(Follow.following_id == target_user.id)
     ).scalars().all()
-    
+
     return [{"id": u.id, "username": u.username, "full_name": u.full_name, "avatar_url": u.avatar_url} for u in followers]
 
 @router.get("/{username}/following")
@@ -173,9 +167,9 @@ def get_following(
     target_user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
-        
+
     following = db.execute(
         select(User).join(Follow, Follow.following_id == User.id).where(Follow.follower_id == target_user.id)
     ).scalars().all()
-    
+
     return [{"id": u.id, "username": u.username, "full_name": u.full_name, "avatar_url": u.avatar_url} for u in following]

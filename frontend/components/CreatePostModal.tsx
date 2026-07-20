@@ -1,16 +1,19 @@
 "use client";
 
 import React, { useState } from "react";
-import { createPost } from "@/lib/api";
+import { createPost, updatePost, PostResponse } from "@/lib/api";
 
 interface CreatePostModalProps {
   onClose: () => void;
   onSuccess: () => void;
+  editingPost?: PostResponse | null; // when set, the modal edits this post instead of creating a new one
 }
 
-export default function CreatePostModal({ onClose, onSuccess }: CreatePostModalProps) {
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
+export default function CreatePostModal({ onClose, onSuccess, editingPost }: CreatePostModalProps) {
+  const isEditMode = !!editingPost;
+
+  const [title, setTitle] = useState(editingPost?.title || "");
+  const [content, setContent] = useState(editingPost?.content || "");
   const [image, setImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -40,16 +43,24 @@ export default function CreatePostModal({ onClose, onSuccess }: CreatePostModalP
     setIsSubmitting(true);
     setError("");
     try {
-      const formData = new FormData();
-      if (title.trim()) formData.append("title", title);
-      if (content.trim()) formData.append("content", content);
-      if (image) formData.append("image", image);
-
-      await createPost(formData);
+      if (isEditMode && editingPost) {
+        // NOTE: editing an image isn't supported yet — the edit endpoint only
+        // accepts title/content. If you attach an image while editing, it's ignored.
+        await updatePost(editingPost.id, {
+          title: title.trim() || undefined,
+          content: content.trim() || undefined,
+        });
+      } else {
+        const formData = new FormData();
+        if (title.trim()) formData.append("title", title);
+        if (content.trim()) formData.append("content", content);
+        if (image) formData.append("image", image);
+        await createPost(formData);
+      }
       onSuccess();
       onClose();
     } catch (err: any) {
-      setError(err.message || "Failed to create post.");
+      setError(err.message || `Failed to ${isEditMode ? "update" : "create"} post.`);
       setIsSubmitting(false);
     }
   };
@@ -58,33 +69,33 @@ export default function CreatePostModal({ onClose, onSuccess }: CreatePostModalP
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div className="bg-surface border border-outline-variant rounded-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh] shadow-2xl">
         <div className="p-4 border-b border-outline-variant flex justify-between items-center bg-surface-container-lowest">
-          <h2 className="text-headline-sm font-bold text-on-surface">Post a Bug</h2>
+          <h2 className="text-headline-sm font-bold text-on-surface">{isEditMode ? "Edit Post" : "Post a Bug"}</h2>
           <button onClick={onClose} className="text-on-surface-variant hover:text-on-surface transition-colors p-1 rounded-full hover:bg-surface-variant">
             <span className="material-symbols-outlined">close</span>
           </button>
         </div>
-        
+
         <form onSubmit={handleSubmit} className="p-4 flex-1 overflow-y-auto flex flex-col gap-4 bg-surface">
           {error && (
             <div className="p-3 bg-error-container/20 text-error rounded-lg text-sm border border-error-container/30">
               {error}
             </div>
           )}
-          
+
           <div>
             <label className="block text-label-lg font-bold text-on-surface mb-1">Title</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={title}
               onChange={e => setTitle(e.target.value)}
               className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-4 py-2 text-body-base text-on-surface focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
               placeholder="E.g., React hydration error in Next.js 14"
             />
           </div>
-          
+
           <div className="flex-1 flex flex-col min-h-[150px]">
             <label className="block text-label-lg font-bold text-on-surface mb-1">Description / Code</label>
-            <textarea 
+            <textarea
               value={content}
               onChange={e => setContent(e.target.value)}
               className="w-full flex-1 bg-surface-container-lowest border border-outline-variant rounded-lg px-4 py-3 font-code-block text-code-block text-on-surface focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all resize-none"
@@ -92,7 +103,18 @@ export default function CreatePostModal({ onClose, onSuccess }: CreatePostModalP
             />
           </div>
 
-          {imagePreview && (
+          {isEditMode && editingPost?.image_url && !imagePreview && (
+            <div className="relative w-full rounded-lg overflow-hidden border border-outline-variant bg-surface-container-highest">
+              <img src={editingPost.image_url} alt="Current" className="w-full max-h-[300px] object-contain opacity-70" />
+              <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                <span className="text-white text-sm bg-black/60 px-3 py-1.5 rounded-lg">
+                  Image editing isn't supported yet
+                </span>
+              </div>
+            </div>
+          )}
+
+          {!isEditMode && imagePreview && (
             <div className="relative w-full rounded-lg overflow-hidden border border-outline-variant bg-surface-container-highest">
               <img src={imagePreview} alt="Preview" className="w-full max-h-[300px] object-contain" />
               <button
@@ -104,33 +126,35 @@ export default function CreatePostModal({ onClose, onSuccess }: CreatePostModalP
               </button>
             </div>
           )}
-          
+
           <div className="flex justify-between items-center pt-4 border-t border-outline-variant mt-2">
             <div>
-              <label className="cursor-pointer text-primary hover:bg-primary-container/20 p-2 rounded-full transition-colors inline-flex items-center justify-center">
-                <span className="material-symbols-outlined">image</span>
-                <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
-              </label>
+              {!isEditMode && (
+                <label className="cursor-pointer text-primary hover:bg-primary-container/20 p-2 rounded-full transition-colors inline-flex items-center justify-center">
+                  <span className="material-symbols-outlined">image</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
+                </label>
+              )}
             </div>
             <div className="flex gap-3">
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={onClose}
                 className="px-4 py-2 rounded-lg font-bold text-on-surface-variant hover:bg-surface-variant transition-colors"
               >
                 Cancel
               </button>
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={isSubmitting}
                 className="px-6 py-2 rounded-lg font-bold bg-primary text-on-primary hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
               >
                 {isSubmitting ? (
                   <span className="material-symbols-outlined animate-spin-slow">progress_activity</span>
                 ) : (
-                  <span className="material-symbols-outlined text-[20px]">send</span>
+                  <span className="material-symbols-outlined text-[20px]">{isEditMode ? "check" : "send"}</span>
                 )}
-                Post
+                {isEditMode ? "Save Changes" : "Post"}
               </button>
             </div>
           </div>

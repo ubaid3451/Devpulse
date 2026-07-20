@@ -192,6 +192,22 @@ export default function ChatPage() {
   const headerAvatar = activeConversation?.is_group ? null : activeOtherParticipant?.avatar_url;
   const otherUserId = activeConversation?.is_group ? null : activeOtherParticipant?.id;
 
+  // Map every participant (including "me") to their avatar/name, so group
+  // chats can show each sender's own photo next to their messages instead
+  // of one fixed "other person" avatar.
+  const participantMap: Record<string, { avatar_url: string | null; name: string }> = {};
+  activeConversation?.participants.forEach((p) => {
+    participantMap[p.id] = { avatar_url: p.avatar_url, name: p.full_name || p.username };
+  });
+  if (currentUser) {
+    participantMap[currentUser.id] = {
+      avatar_url: currentUser.avatar_url,
+      name: currentUser.full_name || currentUser.username,
+    };
+  }
+  const getSenderInfo = (senderId: string) =>
+    participantMap[senderId] || { avatar_url: null, name: "Unknown" };
+
   return (
     <AppLayout activeNav="messages">
       <div className="flex flex-1 overflow-hidden bg-surface text-on-surface w-full h-full">
@@ -266,15 +282,41 @@ export default function ChatPage() {
                       className={`p-3 mx-2 my-1 rounded-lg cursor-pointer transition-colors flex items-center gap-3 ${isActive ? "bg-[#1e2025]" : "hover:bg-[#1e2025]/50"}`}
                     >
                       <div className="relative">
-                        <div className="w-12 h-12 rounded-full overflow-hidden bg-surface-variant shrink-0 border border-outline-variant/30">
-                          {avatar ? (
-                            <img src={avatar} alt={title} className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center font-bold">
-                              {title?.substring(0, 2).toUpperCase()}
-                            </div>
-                          )}
-                        </div>
+                        {conv.is_group ? (
+                          // Group: show a small collage of up to 3 participant avatars
+                          <div className="w-12 h-12 shrink-0 relative">
+                            {conv.participants.slice(0, 3).map((p, i) => (
+                              <div
+                                key={p.id}
+                                title={p.full_name || p.username}
+                                className="absolute w-7 h-7 rounded-full overflow-hidden bg-surface-variant border-2 border-[#111318]"
+                                style={{
+                                  top: i === 0 ? 0 : i === 1 ? 10 : 10,
+                                  left: i === 0 ? 5 : i === 1 ? 0 : 10,
+                                  zIndex: 3 - i,
+                                }}
+                              >
+                                {p.avatar_url ? (
+                                  <img src={p.avatar_url} alt={p.username} className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-[9px] font-bold">
+                                    {(p.full_name || p.username)?.substring(0, 1).toUpperCase()}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="w-12 h-12 rounded-full overflow-hidden bg-surface-variant shrink-0 border border-outline-variant/30">
+                            {avatar ? (
+                              <img src={avatar} alt={title} className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center font-bold">
+                                {title?.substring(0, 2).toUpperCase()}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {/* Online dot indicator (1-on-1 only) */}
                         {!conv.is_group && other && onlineUsers.has(other.id) && (
                           <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-[#111318]"></div>
@@ -343,18 +385,19 @@ export default function ChatPage() {
                 {messages.map((msg, idx) => {
                   const isMine = msg.sender_id === currentUser?.id;
                   const showAvatar = !isMine && (idx === 0 || messages[idx - 1].sender_id !== msg.sender_id);
+                  const sender = getSenderInfo(msg.sender_id);
 
                   return (
                     <div key={msg.id} className={`flex gap-3 ${isMine ? "justify-end" : "justify-start"}`}>
                       {!isMine && (
                         <div className="w-8 h-8 shrink-0 mt-auto">
                           {showAvatar && (
-                            <div className="w-8 h-8 rounded-full overflow-hidden bg-surface-variant">
-                              {headerAvatar ? (
-                                <img src={headerAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                            <div className="w-8 h-8 rounded-full overflow-hidden bg-surface-variant" title={sender.name}>
+                              {sender.avatar_url ? (
+                                <img src={sender.avatar_url} alt={sender.name} className="w-full h-full object-cover" />
                               ) : (
                                 <div className="w-full h-full flex items-center justify-center text-xs font-bold">
-                                  {headerTitle?.substring(0, 2).toUpperCase() || "U"}
+                                  {sender.name?.substring(0, 2).toUpperCase() || "U"}
                                 </div>
                               )}
                             </div>
@@ -363,6 +406,11 @@ export default function ChatPage() {
                       )}
 
                       <div className={`flex flex-col ${isMine ? "items-end" : "items-start"} max-w-[70%] group`}>
+                        {activeConversation?.is_group && !isMine && showAvatar && (
+                          <div className="text-[12px] font-medium text-on-surface-variant mb-1 px-1">
+                            {sender.name}
+                          </div>
+                        )}
                         <div className="flex items-center gap-2">
                           {isMine && (
                             <button
