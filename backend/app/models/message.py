@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
@@ -19,11 +19,17 @@ class Message(Base):
     sender_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    # NOTE: receiver_id is removed. In a group chat there's no single receiver —
-    # "who gets this message" is just "everyone in conversation.participants".
 
+    # For Signal Protocol-encrypted conversations, `content` holds the base64
+    # ciphertext body of a Signal message envelope. `msg_type` distinguishes
+    # the type Signal Protocol assigns: 3 = PreKeyWhisperMessage (the first
+    # message establishing a session), 1 = WhisperMessage (every message
+    # after that, once the Double Ratchet is running). The server never
+    # inspects either value — it just stores and relays them.
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    image_url: Mapped[str] = mapped_column(String(2048), nullable=True)
+    msg_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    image_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(

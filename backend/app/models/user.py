@@ -21,6 +21,8 @@ class User(Base):
     - role is set now (Milestone 1) so admin routes in Milestone 4 just work.
     - is_verified gates login for email/password users (OTP flow).
     - is_active is toggled by admins to block/unblock users (Milestone 4).
+    - public_key is the user's ECDH public key (base64 SPKI), used for E2E
+      encrypted chat. The matching private key never leaves the user's browser.
     """
 
     __tablename__ = "users"
@@ -57,6 +59,11 @@ class User(Base):
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # E2E encryption (Signal Protocol) — identity key + registration id.
+    # Public keys are NOT secret; matching private keys stay client-side.
+    identity_public_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    registration_id: Mapped[int | None] = mapped_column(nullable=True)
+
     # Timestamps (stored as UTC)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -92,10 +99,6 @@ class User(Base):
     )
 
     # Messaging relationships
-    # NOTE: messages_received was removed — Message no longer has a single
-    # receiver_id now that conversations support multiple participants (group chats).
-    # To get "messages a user has received", query via their ConversationParticipant
-    # rows instead (see app.services.chat_history.get_chat_history).
     messages_sent: Mapped[list["Message"]] = relationship(
         "Message",
         foreign_keys="[Message.sender_id]",
