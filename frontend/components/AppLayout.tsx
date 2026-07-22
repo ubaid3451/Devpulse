@@ -25,7 +25,7 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
     { id: "home", label: "Home", icon: "home", href: "/feed" },
     { id: "explore", label: "Explore", icon: "explore", href: "#" },
     { id: "messages", label: "Messages", icon: "mail", href: "/chat" },
-    { id: "notifications", label: "Notifications", icon: "notifications", href: "#" },
+    { id: "notifications", label: "Notifications", icon: "notifications", href: "/notifications" },
   ];
 
   return (
@@ -59,15 +59,15 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
               </div>
             </div>
           </div>
-          
+
           <nav className="flex-1 px-sm mt-4">
             {navItems.map(item => (
               <Link
                 key={item.id}
                 href={item.href}
                 className={`flex items-center gap-md px-md py-sm mb-xs rounded-sm transition-colors ${
-                  activeNav === item.id 
-                    ? "text-primary font-bold border-l-4 border-primary bg-surface-variant -ml-[4px] pl-[12px]" 
+                  activeNav === item.id
+                    ? "text-primary font-bold border-l-4 border-primary bg-surface-variant -ml-[4px] pl-[12px]"
                     : "text-on-surface-variant hover:bg-surface-variant"
                 }`}
               >
@@ -75,7 +75,7 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
                 <span className="font-body-base text-body-base">{item.label}</span>
               </Link>
             ))}
-            
+
             <div className="mt-6 px-md mb-2">
               <button
                 onClick={() => setIsModalOpen(true)}
@@ -86,7 +86,7 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
               </button>
             </div>
           </nav>
-          
+
           <div className="p-md mt-auto">
             {/* User Profile Mini */}
             <Link href={`/profile/${user?.username}`} className="flex items-center gap-3 p-2 rounded-lg hover:bg-surface-variant transition-colors mb-4">
@@ -107,7 +107,7 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
               </div>
               <span className="material-symbols-outlined text-on-surface-variant text-[18px]">settings</span>
             </Link>
-            
+
             <button
               onClick={handleLogout}
               className="w-full flex items-center gap-md px-md py-sm text-error hover:bg-error-container/20 transition-colors rounded-lg"

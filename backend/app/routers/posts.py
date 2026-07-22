@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.models.post import Post, Comment, Like
 from app.models.user import User
+from app.models.follow import Follow
 from app.schemas.post import (
     PostCreate, PostUpdate, PostResponse,
     CommentCreate, CommentResponse, PostDetailResponse
@@ -59,6 +60,25 @@ def get_posts(
     )
 
     if username:
+        target_user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        is_own_profile = target_user.id == current_user.id
+        if target_user.is_private and not is_own_profile:
+            is_follower = db.execute(
+                select(Follow).where(
+                    Follow.follower_id == current_user.id,
+                    Follow.following_id == target_user.id,
+                )
+            ).scalar_one_or_none()
+            if not is_follower:
+                # Private account, viewer doesn't follow them — return no
+                # posts rather than a 403, so the profile page can still
+                # render (bio, follower counts, the "Request to Follow"
+                # button) while the post list itself stays empty.
+                return []
+
         query = query.join(User, Post.author_id == User.id).where(User.username == username)
 
     # Archived posts are hidden from feeds by default. Only show them when

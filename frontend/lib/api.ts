@@ -91,6 +91,7 @@ export interface User {
   bio: string | null;
   oauth_provider: string | null;
   created_at: string;
+  public_key?: string | null;
 }
 
 export interface AuthResponse {
@@ -151,7 +152,17 @@ export interface UserProfileResponse {
   followers_count?: number;
   following_count?: number;
   is_following?: boolean;
+  is_private?: boolean;
+  has_pending_request?: boolean;
 }
+
+export interface FollowRequestResponse {
+  id: string;
+  requester: AuthorResponse;
+  created_at: string;
+}
+
+export type ToggleFollowStatus = "followed" | "unfollowed" | "requested" | "request_cancelled";
 
 // ── Chat types (conversation-based, group-chat capable) ─────────────────────────
 
@@ -167,7 +178,10 @@ export interface ConversationResponse {
   is_group: boolean;
   name: string | null; // group name; null for 1-on-1
   participants: ConversationParticipantInfo[]; // everyone except current user
-  last_message: string | null;
+  last_message: string | null; // ciphertext if last_message_encrypted is true — do not render directly
+  last_message_id: string | null;
+  last_message_msg_type: number | null;
+  last_message_encrypted: boolean;
   last_message_at: string;
 }
 
@@ -175,7 +189,8 @@ export interface ChatMessageResponse {
   id: string;
   conversation_id: string;
   sender_id: string;
-  content: string;
+  content: string; // base64 Signal Protocol ciphertext for E2EE conversations, plaintext otherwise
+  msg_type?: number | null; // 3 = PreKeyWhisperMessage, 1 = WhisperMessage; present when content is encrypted
   image_url?: string | null;
   is_read: boolean;
   created_at: string;
@@ -217,7 +232,15 @@ export const getUserProfile = (username: string) => apiGet<UserProfileResponse>(
 export const updateProfile = (data: { bio?: string, avatar_url?: string, full_name?: string }) => apiPatch<UserProfileResponse>("/users/me/profile", data);
 export const uploadAvatar = (data: FormData) => apiFetch<{ avatar_url: string }>("/users/me/avatar", { method: "POST", body: data });
 
-export const toggleFollow = (username: string) => apiPost<{ status: string }>(`/users/${username}/follow`);
+export const toggleFollow = (username: string) =>
+  apiPost<{ status: ToggleFollowStatus }>(`/users/${username}/follow`);
+export const updatePrivacy = (isPrivate: boolean) =>
+  apiPatch<{ is_private: boolean }>("/users/me/privacy", { is_private: isPrivate });
+export const getFollowRequests = () => apiGet<FollowRequestResponse[]>("/users/me/follow-requests");
+export const acceptFollowRequest = (requestId: string) =>
+  apiPost<{ status: string }>(`/users/follow-requests/${requestId}/accept`);
+export const rejectFollowRequest = (requestId: string) =>
+  apiPost<{ status: string }>(`/users/follow-requests/${requestId}/reject`);
 export const getFollowers = (username: string) => apiGet<AuthorResponse[]>(`/users/${username}/followers`);
 export const getFollowing = (username: string) => apiGet<AuthorResponse[]>(`/users/${username}/following`);
 
@@ -238,3 +261,28 @@ export const uploadChatImage = async (file: File) => {
     body: formData,
   });
 };
+
+// ── E2E Encryption (Signal Protocol) ─────────────────────────────────────────
+
+export interface KeyBundleUploadPayload {
+  identity_public_key: string;
+  registration_id: number;
+  signed_prekey: { key_id: number; public_key: string; signature: string };
+  one_time_prekeys: { key_id: number; public_key: string }[];
+}
+
+export interface KeyBundleResponse {
+  identity_key: string;
+  registration_id: number;
+  signed_prekey: { key_id: number; public_key: string; signature: string };
+  one_time_prekey: { key_id: number; public_key: string } | null;
+}
+
+export const uploadKeyBundle = (payload: KeyBundleUploadPayload) =>
+  apiFetch<{ status: string; one_time_prekeys_uploaded: number }>("/users/me/key-bundle", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+
+export const getKeyBundle = (username: string) =>
+  apiGet<KeyBundleResponse>(`/users/${username}/key-bundle`);

@@ -101,7 +101,14 @@ export default function UserProfilePage({ params }: { params: { username: string
           </div>
 
           <h1 className="text-display-sm font-bold text-on-surface mb-2">{profile.full_name}</h1>
-          <p className="text-headline-sm text-primary mb-6">@{profile.username}</p>
+          <p className="text-headline-sm text-primary mb-6 flex items-center gap-1.5">
+            @{profile.username}
+            {profile.is_private && (
+              <span className="material-symbols-outlined text-[18px] text-on-surface-variant" title="Private account">
+                lock
+              </span>
+            )}
+          </p>
 
           <div className="max-w-lg bg-surface-container-lowest rounded-lg p-md border border-outline-variant w-full mb-8">
             <p className="text-body-lg text-on-surface-variant whitespace-pre-wrap">
@@ -134,13 +141,22 @@ export default function UserProfilePage({ params }: { params: { username: string
               <>
                 <button
                   onClick={handleToggleFollow}
-                  className={`px-6 py-2 font-bold rounded-lg transition-colors ${
-                    profile.is_following
+                  className={`px-6 py-2 font-bold rounded-lg transition-colors flex items-center gap-2 ${
+                    profile.is_following || profile.has_pending_request
                       ? "bg-surface-variant text-on-surface hover:bg-surface-container-high"
                       : "bg-primary text-on-primary hover:brightness-110"
                   }`}
                 >
-                  {profile.is_following ? "Unfollow" : "Follow"}
+                  {profile.has_pending_request && (
+                    <span className="material-symbols-outlined text-[16px]">schedule</span>
+                  )}
+                  {profile.is_following
+                    ? "Unfollow"
+                    : profile.has_pending_request
+                    ? "Requested"
+                    : profile.is_private
+                    ? "Request to Follow"
+                    : "Follow"}
                 </button>
                 <button
                   onClick={() => router.push(`/chat?user=${profile.username}`)}
@@ -183,7 +199,17 @@ export default function UserProfilePage({ params }: { params: { username: string
             </div>
           </div>
 
-          {posts.length === 0 ? (
+          {profile.is_private && !isOwnProfile && !profile.is_following ? (
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-xl text-center">
+              <span className="material-symbols-outlined text-5xl text-on-surface-variant mb-3">lock</span>
+              <h3 className="text-title-md font-bold text-on-surface mb-1">This account is private</h3>
+              <p className="text-body-md text-on-surface-variant">
+                {profile.has_pending_request
+                  ? "Your follow request is pending approval."
+                  : `Follow @${profile.username} to see their posts.`}
+              </p>
+            </div>
+          ) : posts.length === 0 ? (
             <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-xl text-center">
               <span className="material-symbols-outlined text-4xl text-on-surface-variant mb-2">
                 {activeTab === "archived" ? "archive" : "post_add"}

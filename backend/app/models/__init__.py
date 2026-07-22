@@ -7,3 +7,4 @@ from app.models.conversation import Conversation  # noqa: F401
 from app.models.conversation_participant import ConversationParticipant  # noqa: F401
 from app.models.message import Message  # noqa: F401
 from app.models.message_reaction import MessageReaction  # noqa: F401
+from app.models.follow_request import FollowRequest  # noqa: F401
