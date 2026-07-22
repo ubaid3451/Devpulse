@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { ChatSocketProvider } from "@/lib/chat-socket-context";
+import { E2EEProvider } from "@/lib/e2ee-context";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -43,7 +44,9 @@ export default function RootLayout({
       </head>
       <body className="bg-background text-on-background font-body-base antialiased min-h-screen flex flex-col">
         <AuthProvider>
-          <ChatSocketProvider>{children}</ChatSocketProvider>
+          <E2EEProvider>
+            <ChatSocketProvider>{children}</ChatSocketProvider>
+          </E2EEProvider>
         </AuthProvider>
       </body>
     </html>

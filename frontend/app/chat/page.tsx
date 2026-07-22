@@ -4,6 +4,8 @@ import React, { useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useChatSocket } from "@/lib/chat-socket-context";
+import { useE2EE } from "@/lib/e2ee-context";
+import { cacheMessagePlaintext, getCachedMessagePlaintext } from "@/lib/message-plaintext-cache";
 import AppLayout from "@/components/AppLayout";
 import CreateGroupModal from "@/components/CreateGroupModal";
 import EmojiPicker from "emoji-picker-react";
@@ -25,6 +27,7 @@ export default function ChatPage() {
   const { user: currentUser } = useAuth();
   const { onlineUsers, sendMessage, sendReaction, onChatMessage, onReactionUpdate } =
     useChatSocket();
+  const { isReady: e2eeReady, encryptFor, decryptFrom } = useE2EE();
 
   const [conversations, setConversations] = useState<ConversationResponse[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -45,16 +48,64 @@ export default function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // FIFO queue of plaintexts we've sent but haven't yet gotten the server's
+  // echo (with a real message id) for. Matched against onChatMessage events
+  // where sender_id === currentUser.id. Safe to assume FIFO order since a
+  // single WebSocket connection preserves message ordering.
+  const pendingSentPlaintexts = useRef<string[]>([]);
+
+  const [decryptedPreviews, setDecryptedPreviews] = useState<Record<string, string>>({});
 
   const refreshConversations = () => {
     getConversations()
-      .then(setConversations)
+      .then(async (convos) => {
+        setConversations(convos);
+
+        if (!currentUser || !e2eeReady) return;
+
+        // Decrypt each 1-on-1 conversation's last message for the sidebar
+        // preview. Uses the same plaintext cache as the chat view — if this
+        // message was already decrypted once (e.g. because the chat is
+        // currently open), we reuse that instead of re-decrypting (which
+        // would fail, since the one-time message key is already consumed).
+        const previews: Record<string, string> = {};
+        await Promise.all(
+          convos.map(async (convo) => {
+            if (convo.is_group || !convo.last_message_encrypted || !convo.last_message_id) return;
+
+            const cached = getCachedMessagePlaintext(currentUser.id, convo.last_message_id);
+            if (cached !== undefined) {
+              previews[convo.conversation_id] = cached;
+              return;
+            }
+
+            const otherUsername = convo.participants[0]?.username;
+            if (!otherUsername || !convo.last_message || convo.last_message_msg_type == null) return;
+
+            try {
+              const plaintext = await decryptFrom(otherUsername, {
+                content: convo.last_message,
+                msg_type: convo.last_message_msg_type,
+              });
+              cacheMessagePlaintext(currentUser.id, convo.last_message_id, plaintext);
+              previews[convo.conversation_id] = plaintext;
+            } catch (err) {
+              // Most likely cause: this message's one-time key was already
+              // consumed by an earlier decrypt (e.g. while the chat was
+              // open before a reload). Fall back to the lock-icon placeholder.
+              console.error("Failed to decrypt preview for", convo.conversation_id, err);
+            }
+          })
+        );
+        setDecryptedPreviews((prev) => ({ ...prev, ...previews }));
+      })
       .catch((err) => console.error("Failed to load conversations", err));
   };
 
   useEffect(() => {
     refreshConversations();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [e2eeReady]);
 
   // If arriving via ?user=username (e.g. from a profile page "Message" button),
   // resolve it to a conversation_id via the backend, then select it.
@@ -72,14 +123,58 @@ export default function ChatPage() {
   }, [initialUsername]);
 
   useEffect(() => {
-    if (activeConversationId) {
-      getChatHistory(activeConversationId)
-        .then(setMessages)
-        .catch((err) => console.error("Failed to load history", err));
-    } else {
+    if (!activeConversationId) {
       setMessages([]);
+      return;
     }
-  }, [activeConversationId]);
+
+    const convo = conversations.find((c) => c.conversation_id === activeConversationId);
+    const otherUsername = !convo?.is_group ? convo?.participants[0]?.username : undefined;
+
+    getChatHistory(activeConversationId)
+      .then(async (history) => {
+        // Decrypt any messages that carry an iv (i.e. were sent encrypted).
+        // Group chats and any plaintext-era messages pass through unchanged.
+        if (!otherUsername || !e2eeReady) {
+          setMessages(history);
+          return;
+        }
+        const decrypted = await Promise.all(
+          history.map(async (msg) => {
+            if (!msg.msg_type) return msg; // not encrypted — show as-is
+
+            // Check the local plaintext cache FIRST, for both directions:
+            // - your own sent messages can never be decrypted again (ratchet
+            //   already advanced when you encrypted them)
+            // - received messages' one-time message keys are deleted the
+            //   moment they're first decrypted (forward secrecy) — so a
+            //   second decrypt attempt on reload would fail even though it
+            //   worked the first time
+            const cached = currentUser ? getCachedMessagePlaintext(currentUser.id, msg.id) : undefined;
+            if (cached !== undefined) {
+              return { ...msg, content: cached };
+            }
+
+            if (msg.sender_id === currentUser?.id) {
+              // Own message with no cache entry — this can happen for
+              // messages sent before this caching was added.
+              return { ...msg, content: "[Sent message — not available on this device]" };
+            }
+
+            try {
+              const plaintext = await decryptFrom(otherUsername, { content: msg.content, msg_type: msg.msg_type! });
+              if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
+              return { ...msg, content: plaintext };
+            } catch (err) {
+              console.error("Failed to decrypt message", msg.id, err);
+              return { ...msg, content: "[Unable to decrypt message]" };
+            }
+          })
+        );
+        setMessages(decrypted);
+      })
+      .catch((err) => console.error("Failed to load history", err));
+  }, [activeConversationId, conversations, e2eeReady, decryptFrom]);
 
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -106,9 +201,38 @@ export default function ChatPage() {
   // Subscribe to the shared root-level socket for message + reaction events.
   // This page no longer owns a WebSocket connection — it just listens.
   useEffect(() => {
-    const unsubMessage = onChatMessage((msg) => {
+    const unsubMessage = onChatMessage(async (msg) => {
       if (msg.conversation_id === activeConversationId) {
-        setMessages((prev) => [...prev, msg]);
+        let toAppend = msg;
+
+        if (msg.sender_id === currentUser?.id) {
+          // This is the server's echo of a message WE just sent. We already
+          // know the plaintext (we typed it) — grab it from the pending
+          // queue and cache it under the now-known real message id.
+          const pending = pendingSentPlaintexts.current.shift();
+          if (pending && currentUser) {
+            cacheMessagePlaintext(currentUser.id, msg.id, pending);
+            toAppend = { ...msg, content: pending };
+          } else if (currentUser) {
+            const cached = getCachedMessagePlaintext(currentUser.id, msg.id);
+            toAppend = { ...msg, content: cached ?? msg.content };
+          }
+        } else if (msg.msg_type && e2eeReady) {
+          const convo = conversations.find((c) => c.conversation_id === activeConversationId);
+          const otherUsername = !convo?.is_group ? convo?.participants[0]?.username : undefined;
+          if (otherUsername) {
+            try {
+              const plaintext = await decryptFrom(otherUsername, { content: msg.content, msg_type: msg.msg_type! });
+              if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
+              toAppend = { ...msg, content: plaintext };
+            } catch (err) {
+              console.error("Failed to decrypt incoming message", err);
+              toAppend = { ...msg, content: "[Unable to decrypt message]" };
+            }
+          }
+        }
+
+        setMessages((prev) => [...prev, toAppend]);
       }
       refreshConversations();
     });
@@ -124,7 +248,7 @@ export default function ChatPage() {
       unsubReaction();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConversationId, onChatMessage, onReactionUpdate]);
+  }, [activeConversationId, onChatMessage, onReactionUpdate, conversations, e2eeReady, decryptFrom]);
 
   const selectSearchResultUser = async (user: AuthorResponse) => {
     setSearchQuery("");
@@ -148,7 +272,20 @@ export default function ChatPage() {
         imageUrl = res.image_url;
       }
 
-      sendMessage(activeConversationId, inputText.trim(), imageUrl);
+      const convo = conversations.find((c) => c.conversation_id === activeConversationId);
+      const otherUsername = !convo?.is_group ? convo?.participants[0]?.username : undefined;
+
+      // Encrypt for 1-on-1 chats once E2EE is ready. Group chats send
+      // plaintext for now — see the E2EE limitations note.
+      if (otherUsername && e2eeReady && inputText.trim()) {
+        const plaintext = inputText.trim();
+        const { content, msg_type } = await encryptFor(otherUsername, plaintext);
+        pendingSentPlaintexts.current.push(plaintext);
+        sendMessage(activeConversationId, content, imageUrl, msg_type);
+      } else {
+        sendMessage(activeConversationId, inputText.trim(), imageUrl);
+      }
+
       setInputText("");
       setAttachedImage(null);
       setShowEmojiPicker(false);
@@ -327,7 +464,9 @@ export default function ChatPage() {
                           <div className="font-bold text-sm truncate">{title}</div>
                         </div>
                         <div className="text-[13px] text-on-surface-variant truncate opacity-80">
-                          {conv.last_message || "No messages yet"}
+                          {conv.last_message_encrypted
+                            ? decryptedPreviews[conv.conversation_id] ?? "🔒 Encrypted message"
+                            : conv.last_message || "No messages yet"}
                         </div>
                       </div>
                     </div>
@@ -362,7 +501,17 @@ export default function ChatPage() {
                     )}
                   </div>
                   <div>
-                    <div className="font-bold">{headerTitle}</div>
+                    <div className="font-bold flex items-center gap-1.5">
+                      {headerTitle}
+                      {!activeConversation?.is_group && e2eeReady && (
+                        <span
+                          className="material-symbols-outlined text-[15px] text-green-500"
+                          title="Messages are end-to-end encrypted"
+                        >
+                          lock
+                        </span>
+                      )}
+                    </div>
                     {otherUserId && onlineUsers.has(otherUserId) && (
                       <div className="text-[12px] text-green-500 font-medium">Online</div>
                     )}
@@ -584,4 +733,4 @@ export default function ChatPage() {
       )}
     </AppLayout>
   );
-}
+}             

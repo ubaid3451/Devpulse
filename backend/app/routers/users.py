@@ -1,15 +1,37 @@
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
-from sqlalchemy import select, func
+from pydantic import BaseModel
+from sqlalchemy import select, delete, func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.models.user import User
 from app.models.follow import Follow
+from app.models.signed_prekey import SignedPreKey
+from app.models.one_time_prekey import OneTimePreKey
 from app.schemas.user_profile import UserProfileUpdate
 from app.services import cloudinary_service
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+class OneTimePreKeyIn(BaseModel):
+    key_id: int
+    public_key: str
+
+
+class SignedPreKeyIn(BaseModel):
+    key_id: int
+    public_key: str
+    signature: str
+
+
+class KeyBundleUpload(BaseModel):
+    identity_public_key: str
+    registration_id: int
+    signed_prekey: SignedPreKeyIn
+    one_time_prekeys: list[OneTimePreKeyIn]
+
 
 @router.get("/search")
 def search_users(
@@ -106,7 +128,6 @@ def upload_avatar(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception:
-        # Cloudinary/network error — don't leak internal details to the client
         raise HTTPException(status_code=502, detail="Avatar upload failed. Please try again.")
 
     current_user.avatar_url = image_url
@@ -116,6 +137,92 @@ def upload_avatar(
     return {
         "avatar_url": image_url
     }
+
+
+@router.put("/me/key-bundle")
+def upload_key_bundle(
+    body: KeyBundleUpload,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    """
+    Uploads/replaces this user's full Signal Protocol key bundle: identity
+    key, registration id, signed pre-key, and a fresh batch of one-time
+    pre-keys. Called once on first login per device.
+    """
+    current_user.identity_public_key = body.identity_public_key
+    current_user.registration_id = body.registration_id
+
+    existing_spk = db.execute(
+        select(SignedPreKey).where(SignedPreKey.user_id == current_user.id)
+    ).scalar_one_or_none()
+    if existing_spk:
+        existing_spk.key_id = body.signed_prekey.key_id
+        existing_spk.public_key = body.signed_prekey.public_key
+        existing_spk.signature = body.signed_prekey.signature
+    else:
+        db.add(SignedPreKey(
+            user_id=current_user.id,
+            key_id=body.signed_prekey.key_id,
+            public_key=body.signed_prekey.public_key,
+            signature=body.signed_prekey.signature,
+        ))
+
+    db.execute(delete(OneTimePreKey).where(OneTimePreKey.user_id == current_user.id))
+    for otpk in body.one_time_prekeys:
+        db.add(OneTimePreKey(user_id=current_user.id, key_id=otpk.key_id, public_key=otpk.public_key))
+
+    db.commit()
+    return {"status": "ok", "one_time_prekeys_uploaded": len(body.one_time_prekeys)}
+
+
+@router.get("/{username}/key-bundle")
+def get_key_bundle(
+    username: str,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    """
+    Fetches a PreKeyBundle for starting a new Signal Protocol session with
+    this user (X3DH). Consumes ONE one-time pre-key per call.
+    """
+    user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not user.identity_public_key or not user.registration_id:
+        raise HTTPException(status_code=404, detail="This user hasn't set up encryption yet")
+
+    signed_prekey = db.execute(
+        select(SignedPreKey).where(SignedPreKey.user_id == user.id)
+    ).scalar_one_or_none()
+    if not signed_prekey:
+        raise HTTPException(status_code=404, detail="This user hasn't set up encryption yet")
+
+    one_time_prekey = db.execute(
+        select(OneTimePreKey).where(OneTimePreKey.user_id == user.id).limit(1)
+    ).scalar_one_or_none()
+
+    bundle = {
+        "identity_key": user.identity_public_key,
+        "registration_id": user.registration_id,
+        "signed_prekey": {
+            "key_id": signed_prekey.key_id,
+            "public_key": signed_prekey.public_key,
+            "signature": signed_prekey.signature,
+        },
+        "one_time_prekey": None,
+    }
+
+    if one_time_prekey:
+        bundle["one_time_prekey"] = {
+            "key_id": one_time_prekey.key_id,
+            "public_key": one_time_prekey.public_key,
+        }
+        db.delete(one_time_prekey)
+        db.commit()
+
+    return bundle
+
 
 @router.post("/{username}/follow")
 def toggle_follow(

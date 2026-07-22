@@ -91,6 +91,7 @@ export interface User {
   bio: string | null;
   oauth_provider: string | null;
   created_at: string;
+  public_key?: string | null;
 }
 
 export interface AuthResponse {
@@ -167,7 +168,10 @@ export interface ConversationResponse {
   is_group: boolean;
   name: string | null; // group name; null for 1-on-1
   participants: ConversationParticipantInfo[]; // everyone except current user
-  last_message: string | null;
+  last_message: string | null; // ciphertext if last_message_encrypted is true — do not render directly
+  last_message_id: string | null;
+  last_message_msg_type: number | null;
+  last_message_encrypted: boolean;
   last_message_at: string;
 }
 
@@ -175,7 +179,8 @@ export interface ChatMessageResponse {
   id: string;
   conversation_id: string;
   sender_id: string;
-  content: string;
+  content: string; // base64 Signal Protocol ciphertext for E2EE conversations, plaintext otherwise
+  msg_type?: number | null; // 3 = PreKeyWhisperMessage, 1 = WhisperMessage; present when content is encrypted
   image_url?: string | null;
   is_read: boolean;
   created_at: string;
@@ -238,3 +243,28 @@ export const uploadChatImage = async (file: File) => {
     body: formData,
   });
 };
+
+// ── E2E Encryption (Signal Protocol) ─────────────────────────────────────────
+
+export interface KeyBundleUploadPayload {
+  identity_public_key: string;
+  registration_id: number;
+  signed_prekey: { key_id: number; public_key: string; signature: string };
+  one_time_prekeys: { key_id: number; public_key: string }[];
+}
+
+export interface KeyBundleResponse {
+  identity_key: string;
+  registration_id: number;
+  signed_prekey: { key_id: number; public_key: string; signature: string };
+  one_time_prekey: { key_id: number; public_key: string } | null;
+}
+
+export const uploadKeyBundle = (payload: KeyBundleUploadPayload) =>
+  apiFetch<{ status: string; one_time_prekeys_uploaded: number }>("/users/me/key-bundle", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+
+export const getKeyBundle = (username: string) =>
+  apiGet<KeyBundleResponse>(`/users/${username}/key-bundle`);

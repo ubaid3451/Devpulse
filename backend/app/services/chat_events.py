@@ -1,5 +1,5 @@
 """
-Handlers for inbound WebSocket events (reactions, new chat messages) — group-chat capable.
+Handlers for inbound WebSocket events (reactions, new chat messages) — group-chat capable, E2EE-aware.
 """
 
 from sqlalchemy import select
@@ -52,7 +52,6 @@ async def handle_reaction_event(db: Session, user: User, data: dict) -> None:
         "reactions": [{"user_id": r.user_id, "emoji": r.emoji} for r in msg_obj.reactions],
     }
 
-    # Broadcast to every participant in the conversation, not just sender/receiver
     for participant_id in _participant_ids(db, msg_obj.conversation_id):
         await manager.send_personal_message(reaction_payload, participant_id)
 
@@ -62,7 +61,6 @@ async def handle_chat_message_event(db: Session, user: User, data: dict) -> None
     if not conversation_id:
         return
 
-    # Make sure the sender is actually a participant in this conversation
     is_participant = db.execute(
         select(ConversationParticipant).where(
             ConversationParticipant.conversation_id == conversation_id,
@@ -72,10 +70,14 @@ async def handle_chat_message_event(db: Session, user: User, data: dict) -> None
     if not is_participant:
         return
 
+    # content is base64 ciphertext for E2EE conversations, plaintext otherwise.
+    # The server never distinguishes or inspects which — it just stores and
+    # relays whatever the client sends, plus the iv needed to decrypt it.
     new_msg = Message(
         conversation_id=conversation_id,
         sender_id=user.id,
         content=data.get("content", ""),
+        msg_type=data.get("msg_type"),
         image_url=data.get("image_url"),
     )
     db.add(new_msg)
@@ -88,12 +90,12 @@ async def handle_chat_message_event(db: Session, user: User, data: dict) -> None
         "conversation_id": new_msg.conversation_id,
         "sender_id": new_msg.sender_id,
         "content": new_msg.content,
+        "msg_type": new_msg.msg_type,
         "image_url": new_msg.image_url,
         "is_read": new_msg.is_read,
         "created_at": new_msg.created_at.isoformat(),
         "reactions": [],
     }
 
-    # Broadcast to every participant in the conversation (including sender, for confirmation)
     for participant_id in _participant_ids(db, conversation_id):
         await manager.send_personal_message(msg_payload, participant_id)
