@@ -53,7 +53,7 @@ interface ChatSocketContextValue {
   isConnected: boolean;
   onlineUsers: Set<string>;
   /** Send a new chat message into a conversation. */
-  sendMessage: (conversationId: string, content: string, imageUrl?: string | null) => void;
+  sendMessage: (conversationId: string, content: string, imageUrl?: string | null, msgType?: number | null) => void;
   /** Toggle/replace a reaction on a message. */
   sendReaction: (messageId: string, emoji: string) => void;
   /** Subscribe to incoming chat_message events. Returns an unsubscribe fn. */
@@ -151,12 +151,13 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
   }, [user?.id]);
 
   const sendMessage = useCallback(
-    (conversationId: string, content: string, imageUrl?: string | null) => {
+    (conversationId: string, content: string, imageUrl?: string | null, msgType?: number | null) => {
       socketRef.current?.send(
         JSON.stringify({
           conversation_id: conversationId,
           content,
           image_url: imageUrl ?? null,
+          msg_type: msgType ?? null,
         })
       );
     },

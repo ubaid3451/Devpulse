@@ -68,6 +68,9 @@ def get_conversations(db: Session, current_user: User) -> List[dict]:
                 for u in other_participants
             ],
             "last_message": last_message.content if last_message else None,
+            "last_message_id": last_message.id if last_message else None,
+            "last_message_msg_type": last_message.msg_type if last_message else None,
+            "last_message_encrypted": bool(last_message and last_message.msg_type),
             "last_message_at": last_message.created_at if last_message else convo.created_at,
         })
 
@@ -97,6 +100,7 @@ def get_chat_history(db: Session, current_user: User, conversation_id: str) -> O
         "conversation_id": msg.conversation_id,
         "sender_id": msg.sender_id,
         "content": msg.content,
+        "msg_type": msg.msg_type,
         "image_url": msg.image_url,
         "is_read": msg.is_read,
         "created_at": msg.created_at,

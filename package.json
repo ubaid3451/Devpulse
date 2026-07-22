@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@privacyresearch/libsignal-protocol-typescript": "^0.0.16"
+  }
+}

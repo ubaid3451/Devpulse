@@ -51,9 +51,7 @@ def upgrade() -> None:
     # Messages now carry a Signal Protocol envelope: `content` becomes the
     # base64 ciphertext body, `msg_type` distinguishes the first message in a
     # session (PreKeyWhisperMessage, type 3) from subsequent ones
-    # (WhisperMessage, type 1). The old `iv` column from the simpler ECDH
-    # scheme is no longer used by Signal Protocol — the ratchet handles this
-    # internally — so we drop it.
+    # (WhisperMessage, type 1).
     op.add_column("messages", sa.Column("msg_type", sa.Integer(), nullable=True))
 
 

@@ -1,6 +1,6 @@
 """Add is_archived to posts
 
-Revision ID: REPLACE_WITH_NEW_ID
+Revision ID: archived_posts_001
 Revises: c44ab2f9dc3a
 Create Date: 2026-07-17 00:00:00.000000
 """
@@ -14,7 +14,6 @@ from alembic import op
 revision: str = "archived_posts_001"
 down_revision: Union[str, None] = "c44ab2f9dc3a"
 branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:

@@ -1,7 +1,7 @@
 """Add is_private to users and follow_requests table
 
-Revision ID: REPLACE_WITH_NEW_ID
-Revises: REPLACE_WITH_YOUR_CURRENT_HEAD
+Revision ID: follow_requests_001
+Revises: signal_protocol_001
 Create Date: 2026-07-21 00:00:00.000000
 """
 from __future__ import annotations
