@@ -67,6 +67,7 @@ class UserResponse(BaseModel):
     role: str
     is_verified: bool
     is_active: bool
+    is_private: bool
     avatar_url: str | None
     bio: str | None
     oauth_provider: str | None

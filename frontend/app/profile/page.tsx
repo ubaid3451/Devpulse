@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { updateProfile, uploadAvatar } from "@/lib/api";
+import { updateProfile, uploadAvatar, updatePrivacy } from "@/lib/api";
 
 const PREDEFINED_AVATARS = [
   "https://api.dicebear.com/7.x/bottts/svg?seed=Felix",
@@ -16,12 +16,14 @@ const PREDEFINED_AVATARS = [
 export default function MyProfilePage() {
   const router = useRouter();
   const { user, isLoading } = useAuth();
-  
+
   const [bio, setBio] = useState("");
   const [fullName, setFullName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [isPrivate, setIsPrivate] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isTogglingPrivacy, setIsTogglingPrivacy] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -29,6 +31,7 @@ export default function MyProfilePage() {
       setBio(user.bio || "");
       setFullName(user.full_name || "");
       setAvatarUrl(user.avatar_url || "");
+      setIsPrivate((user as any).is_private || false);
     }
   }, [user]);
 
@@ -64,6 +67,25 @@ export default function MyProfilePage() {
     }
   };
 
+  const handleTogglePrivacy = async () => {
+    const newValue = !isPrivate;
+    setIsTogglingPrivacy(true);
+    setMessage("");
+    try {
+      await updatePrivacy(newValue);
+      setIsPrivate(newValue);
+      setMessage(
+        newValue
+          ? "Your account is now private. New followers will need your approval."
+          : "Your account is now public. Anyone can follow you instantly."
+      );
+    } catch (err: any) {
+      setMessage(err.message || "Failed to update privacy setting");
+    } finally {
+      setIsTogglingPrivacy(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -72,10 +94,9 @@ export default function MyProfilePage() {
       await updateProfile({
         bio,
         full_name: fullName,
-        avatar_url: avatarUrl || undefined, // or null, but our API uses Optional
+        avatar_url: avatarUrl || undefined,
       });
       setMessage("Profile updated successfully!");
-      // Ideally, update the user context too, but the easiest way is to reload or just show the message
       setTimeout(() => {
         window.location.reload();
       }, 1000);
@@ -97,14 +118,49 @@ export default function MyProfilePage() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto p-md lg:p-lg">
-        <form onSubmit={handleSubmit} className="bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg space-y-6">
-          {message && (
-            <div className={`p-4 rounded-lg text-sm border ${message.includes("successfully") ? "bg-primary-container/20 text-primary border-primary/30" : "bg-error-container/20 text-error border-error/30"}`}>
-              {message}
-            </div>
-          )}
+      <main className="max-w-2xl mx-auto p-md lg:p-lg space-y-6">
+        {message && (
+          <div className={`p-4 rounded-lg text-sm border ${message.includes("successfully") || message.includes("now private") || message.includes("now public") ? "bg-primary-container/20 text-primary border-primary/30" : "bg-error-container/20 text-error border-error/30"}`}>
+            {message}
+          </div>
+        )}
 
+        {/* Privacy Settings — separate card, saves immediately (not tied to the main form's Save button) */}
+        <div className="bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="material-symbols-outlined text-[20px] text-on-surface-variant">
+                  {isPrivate ? "lock" : "public"}
+                </span>
+                <label className="text-label-lg font-bold text-on-surface">
+                  {isPrivate ? "Private Account" : "Public Account"}
+                </label>
+              </div>
+              <p className="text-body-sm text-on-surface-variant">
+                {isPrivate
+                  ? "New followers must be approved by you before they can see your posts."
+                  : "Anyone can follow you and see your posts instantly."}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleTogglePrivacy}
+              disabled={isTogglingPrivacy}
+              className={`relative w-14 h-8 rounded-full transition-colors shrink-0 disabled:opacity-50 ${
+                isPrivate ? "bg-primary" : "bg-surface-variant"
+              }`}
+            >
+              <span
+                className={`absolute top-1 left-1 w-6 h-6 bg-white rounded-full shadow-md transition-transform ${
+                  isPrivate ? "translate-x-6" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg space-y-6">
           <div className="flex flex-col gap-4">
             <label className="block text-label-lg font-bold text-on-surface">Profile Avatar</label>
             <div className="flex flex-col md:flex-row items-center md:items-start gap-6">
@@ -119,12 +175,12 @@ export default function MyProfilePage() {
                   <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} disabled={isUploading} />
                 </label>
               </div>
-              
+
               <div className="flex-1 w-full">
                 <div className="text-body-sm text-on-surface-variant mb-3 text-center md:text-left">
                   Upload a custom photo or choose a bot!
                 </div>
-                
+
                 {isUploading ? (
                   <div className="h-16 flex items-center justify-center bg-surface-container-lowest rounded-lg border border-outline-variant/50">
                     <span className="material-symbols-outlined animate-spin-slow text-primary">progress_activity</span>
@@ -182,7 +238,7 @@ export default function MyProfilePage() {
           </div>
 
           <div className="pt-4 flex justify-end">
-            <button 
+            <button
               type="submit"
               disabled={isSubmitting}
               className="px-6 py-2 bg-primary text-on-primary font-bold rounded-lg hover:brightness-110 disabled:opacity-50 transition-colors"

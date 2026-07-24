@@ -1,7 +1,7 @@
 """Add Signal Protocol key bundle tables (identity key, signed prekey, one-time prekeys)
 
-Revision ID: REPLACE_WITH_NEW_ID
-Revises: REPLACE_WITH_YOUR_CURRENT_HEAD
+Revision ID: signal_protocol_001
+Revises: archived_posts_001
 Create Date: 2026-07-21 00:00:00.000000
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "signal_protocol_001"
-down_revision: Union[str, None] = "archived_posts_001"  # must match the revision id you set in step 2
+down_revision: Union[str, None] = "archived_posts_001"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -51,9 +51,7 @@ def upgrade() -> None:
     # Messages now carry a Signal Protocol envelope: `content` becomes the
     # base64 ciphertext body, `msg_type` distinguishes the first message in a
     # session (PreKeyWhisperMessage, type 3) from subsequent ones
-    # (WhisperMessage, type 1). The old `iv` column from the simpler ECDH
-    # scheme is no longer used by Signal Protocol — the ratchet handles this
-    # internally — so we drop it.
+    # (WhisperMessage, type 1).
     op.add_column("messages", sa.Column("msg_type", sa.Integer(), nullable=True))
 
 
