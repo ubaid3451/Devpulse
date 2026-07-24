@@ -23,8 +23,8 @@ import { uploadKeyBundle, getKeyBundle } from "./api";
 const DEVICE_ID = 1; // single-device scope for this project
 const ONE_TIME_PREKEY_BATCH_SIZE = 50;
 
-function bufToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
+function bufToBase64(buf: ArrayBuffer | undefined): string {
+  const bytes = new Uint8Array(buf!);
   let binary = "";
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
