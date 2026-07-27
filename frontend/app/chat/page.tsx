@@ -8,8 +8,8 @@ import { useE2EE } from "@/lib/e2ee-context";
 import { cacheMessagePlaintext, getCachedMessagePlaintext } from "@/lib/message-plaintext-cache";
 import AppLayout from "@/components/AppLayout";
 import CreateGroupModal from "@/components/CreateGroupModal";
-import EmojiPicker from "emoji-picker-react";
-import { ChatList } from "../components/chat-list";
+import EmojiPicker, { Theme } from "emoji-picker-react";
+import { ChatList } from "@/components/chat-list";
 import {
   getConversations,
   ConversationResponse,
@@ -43,6 +43,7 @@ export default function ChatPage() {
 
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
   const [attachedImage, setAttachedImage] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -689,7 +690,7 @@ export default function ChatPage() {
                           <div className={`absolute z-20 ${isMine ? "right-12" : "left-12"} mt-1`}>
                             <EmojiPicker
                               onEmojiClick={(e) => toggleReaction(msg.id, e.emoji)}
-                              theme="dark"
+                              theme={Theme.DARK}
                               lazyLoadEmojis={true}
                             />
                           </div>
@@ -744,7 +745,7 @@ export default function ChatPage() {
                       <div className="absolute bottom-full left-0 mb-2 z-30">
                         <EmojiPicker
                           onEmojiClick={(e) => setInputText((prev) => prev + e.emoji)}
-                          theme="dark"
+                          theme={Theme.DARK}
                         />
                       </div>
                     )}
