@@ -21,7 +21,7 @@ import { SignalProtocolStore } from "./signal-store";
 import { uploadKeyBundle, getKeyBundle } from "./api";
 
 const DEVICE_ID = 1; // single-device scope for this project
-const ONE_TIME_PREKEY_BATCH_SIZE = 50;
+const ONE_TIME_PREKEY_BATCH_SIZE = 20;
 
 function bufToBase64(buf: ArrayBuffer | undefined): string {
   const bytes = new Uint8Array(buf!);
@@ -51,13 +51,32 @@ function getStore(userId: string): SignalProtocolStore {
   return store;
 }
 
+// Tracks in-flight setup calls per user so concurrent invocations (e.g. the
+// auth effect firing twice in React StrictMode, or multiple tabs/components
+// reacting to the same login) await the same promise instead of racing to
+// generate/upload two different identities for the same user.
+const pendingSetups = new Map<string, Promise<void>>();
+
 /**
  * Ensures this browser has a Signal Protocol identity set up for `userId`,
  * generating one (and uploading the public bundle) if this is the first
  * time. Safe to call on every login — it's a no-op after the first
- * successful run for that user.
+ * successful run for that user. Safe to call concurrently for the same
+ * user — only one initialization will actually run; other callers await
+ * the same in-flight promise.
  */
 export async function ensureIdentitySetUp(userId: string): Promise<void> {
+  const existingCall = pendingSetups.get(userId);
+  if (existingCall) return existingCall;
+
+  const setupPromise = doEnsureIdentitySetUp(userId).finally(() => {
+    pendingSetups.delete(userId);
+  });
+  pendingSetups.set(userId, setupPromise);
+  return setupPromise;
+}
+
+async function doEnsureIdentitySetUp(userId: string): Promise<void> {
   const store = getStore(userId);
   const existing = await store.getIdentityKeyPair();
   if (existing) return; // already set up in this browser for this user
@@ -98,6 +117,39 @@ function addressFor(username: string): SignalProtocolAddress {
   return new SignalProtocolAddress(username, DEVICE_ID);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Fetching a recipient's key bundle can race a backend that just finished
+// uploading it (e.g. the recipient's very first login) or a DB replica that
+// hasn't caught up yet. Retry a few times with backoff before giving up.
+const KEY_BUNDLE_FETCH_RETRIES = 4;
+const KEY_BUNDLE_RETRY_BASE_DELAY_MS = 300;
+
+async function getKeyBundleWithRetry(username: string) {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= KEY_BUNDLE_FETCH_RETRIES; attempt++) {
+    try {
+      return await getKeyBundle(username);
+    } catch (err) {
+      lastError = err;
+      if (attempt === KEY_BUNDLE_FETCH_RETRIES) break;
+      const delay = KEY_BUNDLE_RETRY_BASE_DELAY_MS * 2 ** attempt;
+      console.warn(
+        `⚠️ Fetching key bundle for "${username}" failed (attempt ${attempt + 1}/${
+          KEY_BUNDLE_FETCH_RETRIES + 1
+        }), retrying in ${delay}ms...`,
+        err
+      );
+      await sleep(delay);
+    }
+  }
+
+  throw lastError;
+}
+
 /** Builds a session with `username` via X3DH if one doesn't already exist. */
 async function ensureSessionWith(myUserId: string, username: string): Promise<void> {
   const store = getStore(myUserId);
@@ -105,7 +157,7 @@ async function ensureSessionWith(myUserId: string, username: string): Promise<vo
   const existingSession = await store.loadSession(address.toString());
   if (existingSession) return;
 
-  const bundle = await getKeyBundle(username);
+  const bundle = await getKeyBundleWithRetry(username);
 
   const preKeyBundle: any = {
     identityKey: base64ToBuf(bundle.identity_key),

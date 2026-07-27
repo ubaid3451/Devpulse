@@ -8,6 +8,7 @@ import React, {
   useReducer,
 } from "react";
 import { ApiError, apiGet, apiPost, type AuthResponse, type User } from "./api";
+import { ensureIdentitySetUp } from "./signal-e2ee";
 
 // ── State ──────────────────────────────────────────────────────────────────────
 
@@ -83,10 +84,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshUser();
   }, [refreshUser]);
 
+  /**
+   * Initialize Signal Protocol in the background whenever
+   * a user becomes authenticated.
+   */
+  useEffect(() => {
+    if (!state.user) return;
+
+    const user = state.user;
+
+    (async () => {
+     try {
+        console.log("🔐 Initializing Signal identity...");
+     await ensureIdentitySetUp(user.id);
+      console.log("✅ Signal identity ready.");
+     } catch (err) {
+      console.error("❌ Failed to initialize Signal identity:", err);
+    }
+  })();
+}, [state.user]);
+
   const login = useCallback(async (email: string, password: string) => {
     dispatch({ type: "SET_LOADING", loading: true });
-    const res = await apiPost<AuthResponse>("/auth/login", { email, password });
+
+    const res = await apiPost<AuthResponse>("/auth/login", {
+      email,
+      password,
+    });
+
     dispatch({ type: "SET_USER", user: res.user });
+
     return res.user;
   }, []);
 
@@ -127,8 +154,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
+
   if (!ctx) {
     throw new Error("useAuth must be used within <AuthProvider>");
   }
+
   return ctx;
 }

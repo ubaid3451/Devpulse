@@ -101,6 +101,35 @@ def get_chat_history(
     return history
 
 
+@router.delete("/conversations/{conversation_id}/hide")
+def hide_conversation(
+    conversation_id: str,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    """
+    Soft delete: removes the current user from the conversation's participant
+    list so it disappears from their chat sidebar. The other participant(s)
+    keep the conversation and its full message history.
+    """
+    from sqlalchemy import select
+    from app.models.conversation_participant import ConversationParticipant
+
+    participant = db.execute(
+        select(ConversationParticipant).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.user_id == current_user.id,
+        )
+    ).scalar_one_or_none()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Conversation not found or you are not a participant")
+
+    db.delete(participant)
+    db.commit()
+    return {"status": "hidden"}
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
     token = websocket.cookies.get("access_token")

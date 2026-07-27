@@ -245,6 +245,14 @@ export const getFollowers = (username: string) => apiGet<AuthorResponse[]>(`/use
 export const getFollowing = (username: string) => apiGet<AuthorResponse[]>(`/users/${username}/following`);
 
 export const getConversations = () => apiGet<ConversationResponse[]>("/chat/conversations");
+// Soft delete: hides the conversation from the current user's list only.
+// The other participant(s) keep seeing it and their full message history.
+// Backend contract: this does NOT delete messages or the conversation row —
+// it just records a per-user "hidden_at" marker. If the current user
+// receives a new message in that conversation afterwards, the backend
+// should clear the marker so it reappears in their list.
+export const hideConversation = (conversationId: string) =>
+  apiDelete<{ status: string }>(`/chat/conversations/${conversationId}/hide`);
 export const getChatHistory = (conversationId: string) =>
   apiGet<ChatMessageResponse[]>(`/chat/${conversationId}`);
 export const startDirectConversation = (username: string) =>
@@ -286,3 +294,25 @@ export const uploadKeyBundle = (payload: KeyBundleUploadPayload) =>
 
 export const getKeyBundle = (username: string) =>
   apiGet<KeyBundleResponse>(`/users/${username}/key-bundle`);
+
+// ── Explore page ──────────────────────────────────────────────────────────────
+
+export interface ExploreUser {
+  id: string;
+  username: string;
+  full_name: string;
+  avatar_url: string | null;
+  bio: string | null;
+  is_private: boolean;
+  is_following: boolean;
+  has_pending_request: boolean;
+}
+
+export interface ExploreUsersResponse {
+  users: ExploreUser[];
+  total: number;
+  has_more: boolean;
+}
+
+export const getExploreUsers = (skip: number = 0, limit: number = 20) =>
+  apiGet<ExploreUsersResponse>(`/users/explore?skip=${skip}&limit=${limit}`);

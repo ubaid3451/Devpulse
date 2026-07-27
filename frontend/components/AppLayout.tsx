@@ -23,7 +23,7 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
 
   const navItems = [
     { id: "home", label: "Home", icon: "home", href: "/feed" },
-    { id: "explore", label: "Explore", icon: "explore", href: "#" },
+    { id: "explore", label: "Explore", icon: "explore", href: "/explore" },
     { id: "messages", label: "Messages", icon: "mail", href: "/chat" },
     { id: "notifications", label: "Notifications", icon: "notifications", href: "/notifications" },
   ];

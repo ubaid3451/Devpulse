@@ -1,40 +1,61 @@
+version: "3.9"
+
 services:
   db:
-    image: postgres:16-alpine
-    container_name: devpulse_db
+    image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: <PLACEHOLDER>
-      POSTGRES_PASSWORD: <PLACEHOLDER>
-      POSTGRES_DB: <PLACEHOLDER>
+      POSTGRES_USER: devpulse
+      POSTGRES_PASSWORD: devpulse_password   # change this — see note below
+      POSTGRES_DB: devpulse
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U <PLACEHOLDER> -d <PLACEHOLDER>"]
+      test: ["CMD-SHELL", "pg_isready -U devpulse"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  api:
-    build: .
-    container_name: devpulse_api
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://<PLACEHOLDER>:<PLACEHOLDER>@db:5432/<PLACEHOLDER>
     ports:
       - "8000:8000"
-    volumes:
-      - ./app:/app/app
-      - ./alembic:/app/alembic
-      - ./alembic.ini:/app/alembic.ini
+    environment:
+      # Note: "db" here is the service name above, not "localhost" — Docker
+      # Compose gives each service a DNS name matching its service key, so
+      # containers can reach each other by service name on the shared network.
+      DATABASE_URL: postgresql://devpulse:devpulse_password@db:5432/devpulse
+      SECRET_KEY: ${SECRET_KEY}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
     depends_on:
       db:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      # Mounts your local backend code into the container, so code changes
+      # show up without rebuilding the image — useful for active development.
+      # Remove this volume for a production-style build.
+      - ./backend:/app
+      - /app/.venv  # prevents the host's (absent) venv from shadowing the container's installed packages
 
 volumes:
   postgres_data:

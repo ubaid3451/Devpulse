@@ -9,6 +9,7 @@ import { cacheMessagePlaintext, getCachedMessagePlaintext } from "@/lib/message-
 import AppLayout from "@/components/AppLayout";
 import CreateGroupModal from "@/components/CreateGroupModal";
 import EmojiPicker from "emoji-picker-react";
+import { ChatList } from "../components/chat-list";
 import {
   getConversations,
   ConversationResponse,
@@ -18,6 +19,7 @@ import {
   AuthorResponse,
   uploadChatImage,
   startDirectConversation,
+  hideConversation,
 } from "@/lib/api";
 
 export default function ChatPage() {
@@ -43,7 +45,25 @@ export default function ChatPage() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [attachedImage, setAttachedImage] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const confirmDelete = async (conversationId: string) => {
+    setDeletingId(conversationId);
+    try {
+      await hideConversation(conversationId);
+      setConversations((prev) => prev.filter((c) => c.conversation_id !== conversationId));
+      if (activeConversationId === conversationId) {
+        setActiveConversationId(null);
+      }
+    } catch (err) {
+      console.error("Failed to delete conversation", err);
+    } finally {
+      setDeletingId(null);
+      setPendingDeleteId(null);
+    }
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -412,63 +432,136 @@ export default function ChatPage() {
                   const title = conv.is_group ? conv.name || "Group chat" : other?.full_name || other?.username;
                   const avatar = conv.is_group ? null : other?.avatar_url;
                   const isActive = activeConversationId === conv.conversation_id;
+                  const isMenuOpen = openMenuId === conv.conversation_id;
+                  const isPendingDelete = pendingDeleteId === conv.conversation_id;
+                  const isDeleting = deletingId === conv.conversation_id;
+
                   return (
                     <div
                       key={conv.conversation_id}
-                      onClick={() => setActiveConversationId(conv.conversation_id)}
-                      className={`p-3 mx-2 my-1 rounded-lg cursor-pointer transition-colors flex items-center gap-3 ${isActive ? "bg-[#1e2025]" : "hover:bg-[#1e2025]/50"}`}
+                      className={`group relative p-3 mx-2 my-1 rounded-lg transition-colors flex items-center gap-3 ${
+                        isActive ? "bg-[#1e2025]" : "hover:bg-[#1e2025]/50"
+                      }`}
                     >
-                      <div className="relative">
-                        {conv.is_group ? (
-                          // Group: show a small collage of up to 3 participant avatars
-                          <div className="w-12 h-12 shrink-0 relative">
-                            {conv.participants.slice(0, 3).map((p, i) => (
-                              <div
-                                key={p.id}
-                                title={p.full_name || p.username}
-                                className="absolute w-7 h-7 rounded-full overflow-hidden bg-surface-variant border-2 border-[#111318]"
-                                style={{
-                                  top: i === 0 ? 0 : i === 1 ? 10 : 10,
-                                  left: i === 0 ? 5 : i === 1 ? 0 : 10,
-                                  zIndex: 3 - i,
-                                }}
-                              >
-                                {p.avatar_url ? (
-                                  <img src={p.avatar_url} alt={p.username} className="w-full h-full object-cover" />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-[9px] font-bold">
-                                    {(p.full_name || p.username)?.substring(0, 1).toUpperCase()}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
+                      <div
+                        onClick={() => setActiveConversationId(conv.conversation_id)}
+                        className="flex flex-1 items-center gap-3 min-w-0 cursor-pointer"
+                      >
+                        <div className="relative">
+                          {conv.is_group ? (
+                            // Group: show a small collage of up to 3 participant avatars
+                            <div className="w-12 h-12 shrink-0 relative">
+                              {conv.participants.slice(0, 3).map((p, i) => (
+                                <div
+                                  key={p.id}
+                                  title={p.full_name || p.username}
+                                  className="absolute w-7 h-7 rounded-full overflow-hidden bg-surface-variant border-2 border-[#111318]"
+                                  style={{
+                                    top: i === 0 ? 0 : i === 1 ? 10 : 10,
+                                    left: i === 0 ? 5 : i === 1 ? 0 : 10,
+                                    zIndex: 3 - i,
+                                  }}
+                                >
+                                  {p.avatar_url ? (
+                                    <img src={p.avatar_url} alt={p.username} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-[9px] font-bold">
+                                      {(p.full_name || p.username)?.substring(0, 1).toUpperCase()}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="w-12 h-12 rounded-full overflow-hidden bg-surface-variant shrink-0 border border-outline-variant/30">
+                              {avatar ? (
+                                <img src={avatar} alt={title} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center font-bold">
+                                  {title?.substring(0, 2).toUpperCase()}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {/* Online dot indicator (1-on-1 only) */}
+                          {!conv.is_group && other && onlineUsers.has(other.id) && (
+                            <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-[#111318]"></div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between items-baseline mb-0.5">
+                            <div className="font-bold text-sm truncate">{title}</div>
                           </div>
-                        ) : (
-                          <div className="w-12 h-12 rounded-full overflow-hidden bg-surface-variant shrink-0 border border-outline-variant/30">
-                            {avatar ? (
-                              <img src={avatar} alt={title} className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center font-bold">
-                                {title?.substring(0, 2).toUpperCase()}
-                              </div>
-                            )}
+                          <div className="text-[13px] text-on-surface-variant truncate opacity-80">
+                            {conv.last_message_encrypted
+                              ? decryptedPreviews[conv.conversation_id] ?? "🔒 Encrypted message"
+                              : conv.last_message || "No messages yet"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 3-dots Options Menu */}
+                      <div className="relative shrink-0">
+                        <button
+                          type="button"
+                          aria-label={`More options for ${title}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenMenuId(isMenuOpen ? null : conv.conversation_id);
+                          }}
+                          className={`rounded-lg p-1.5 text-on-surface-variant transition-colors hover:bg-white/10 hover:text-white ${
+                            isMenuOpen ? "bg-white/10 text-white" : "opacity-0 group-hover:opacity-100"
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[18px]">more_vert</span>
+                        </button>
+
+                        {isMenuOpen && (
+                          <div
+                            className="absolute right-0 top-9 z-20 w-36 overflow-hidden rounded-lg border border-outline-variant/40 bg-[#1e2025] shadow-xl"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                setPendingDeleteId(conv.conversation_id);
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-red-400 hover:bg-red-500/10 transition-colors"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">delete</span>
+                              Delete chat
+                            </button>
                           </div>
                         )}
-                        {/* Online dot indicator (1-on-1 only) */}
-                        {!conv.is_group && other && onlineUsers.has(other.id) && (
-                          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-[#111318]"></div>
-                        )}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex justify-between items-baseline mb-0.5">
-                          <div className="font-bold text-sm truncate">{title}</div>
+
+                      {/* Delete Confirmation Modal Overlay */}
+                      {isPendingDelete && (
+                        <div
+                          className="absolute inset-0 z-30 flex items-center justify-between gap-2 rounded-lg bg-[#1e2025] px-3 border border-red-500/30"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span className="text-xs text-on-surface truncate font-medium">Delete chat?</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setPendingDeleteId(null)}
+                              className="rounded px-2 py-1 text-xs text-on-surface-variant hover:bg-white/10"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isDeleting}
+                              onClick={() => confirmDelete(conv.conversation_id)}
+                              className="rounded bg-red-500/90 px-2 py-1 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-50"
+                            >
+                              {isDeleting ? "..." : "Delete"}
+                            </button>
+                          </div>
                         </div>
-                        <div className="text-[13px] text-on-surface-variant truncate opacity-80">
-                          {conv.last_message_encrypted
-                            ? decryptedPreviews[conv.conversation_id] ?? "🔒 Encrypted message"
-                            : conv.last_message || "No messages yet"}
-                        </div>
-                      </div>
+                      )}
                     </div>
                   );
                 })}

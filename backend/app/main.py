@@ -67,3 +67,27 @@ app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 @app.get("/health", tags=["System"])
 async def health():
     return {"status": "ok", "service": "devpulse-api"}
+
+# ── WebSocket pass-through wrapper ────────────────────────────────────────────
+# Starlette's CORSMiddleware and SessionMiddleware don't handle WebSocket
+# upgrade requests correctly — they return 403 Forbidden. This ASGI wrapper
+# sits outside all middleware: for WebSocket connections it routes directly
+# to the underlying FastAPI/Starlette router (skipping CORS & session),
+# while HTTP requests go through the normal middleware stack.
+
+_fastapi_app = app  # the full app with middleware (for HTTP)
+
+
+async def _ws_bypass_asgi(scope, receive, send):
+    if scope["type"] == "websocket":
+        # Ensure FastAPI's dependency injection (Depends) works inside the endpoint
+        scope.setdefault("app", _fastapi_app)
+        # Route directly to the router, bypassing CORSMiddleware/SessionMiddleware
+        await _fastapi_app.router(scope, receive, send)
+    else:
+        # HTTP and lifespan go through the full middleware stack
+        await _fastapi_app(scope, receive, send)
+
+
+# Re-export so `uvicorn app.main:app` picks up the wrapper
+app = _ws_bypass_asgi

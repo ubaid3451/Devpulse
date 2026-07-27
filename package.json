@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "@privacyresearch/libsignal-protocol-typescript": "^0.0.16"
+    "@privacyresearch/libsignal-protocol-typescript": "^0.0.16",
+    "lucide-react": "^1.27.0"
   }
 }
