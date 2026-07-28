@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, File, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import select, or_, and_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser, get_current_user_ws
 from app.services.connection_manager import manager
 from app.services import chat_history, chat_events, image_upload
+from app.models.block import Block
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -51,7 +53,6 @@ def start_direct_conversation(
     db: Session = Depends(get_db)
 ):
     """Finds an existing 1-on-1 conversation with the given username, or creates one."""
-    from sqlalchemy import select
     from app.models.user import User
 
     other_user = db.execute(select(User).where(User.username == body.username)).scalar_one_or_none()
@@ -61,7 +62,16 @@ def start_direct_conversation(
         raise HTTPException(status_code=400, detail="Cannot start a conversation with yourself")
 
     convo = chat_history.get_or_create_direct_conversation(db, current_user.id, other_user.id)
-    return {"conversation_id": convo.id, "is_group": convo.is_group}
+    is_blocked = db.execute(
+        select(Block).where(
+            or_(
+                and_(Block.blocker_id == current_user.id, Block.blocked_id == other_user.id),
+                and_(Block.blocker_id == other_user.id, Block.blocked_id == current_user.id),
+            )
+        )
+    ).scalar_one_or_none() is not None
+
+    return {"conversation_id": convo.id, "is_group": convo.is_group, "is_blocked": is_blocked}
 
 
 @router.post("/conversations/group")
@@ -70,7 +80,6 @@ def create_group_conversation(
     current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
-    from sqlalchemy import select
     from app.models.user import User
 
     if not body.name.strip():
@@ -99,35 +108,6 @@ def get_chat_history(
     if history is None:
         raise HTTPException(status_code=404, detail="Conversation not found or access denied")
     return history
-
-
-@router.delete("/conversations/{conversation_id}/hide")
-def hide_conversation(
-    conversation_id: str,
-    current_user: CurrentUser,
-    db: Session = Depends(get_db)
-):
-    """
-    Soft delete: removes the current user from the conversation's participant
-    list so it disappears from their chat sidebar. The other participant(s)
-    keep the conversation and its full message history.
-    """
-    from sqlalchemy import select
-    from app.models.conversation_participant import ConversationParticipant
-
-    participant = db.execute(
-        select(ConversationParticipant).where(
-            ConversationParticipant.conversation_id == conversation_id,
-            ConversationParticipant.user_id == current_user.id,
-        )
-    ).scalar_one_or_none()
-
-    if not participant:
-        raise HTTPException(status_code=404, detail="Conversation not found or you are not a participant")
-
-    db.delete(participant)
-    db.commit()
-    return {"status": "hidden"}
 
 
 @router.websocket("/ws")

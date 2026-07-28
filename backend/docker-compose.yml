@@ -20,7 +20,7 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
@@ -54,7 +54,7 @@ services:
       # Mounts your local backend code into the container, so code changes
       # show up without rebuilding the image — useful for active development.
       # Remove this volume for a production-style build.
-      - ./backend:/app
+      - .:/app
       - /app/.venv  # prevents the host's (absent) venv from shadowing the container's installed packages
 
 volumes:

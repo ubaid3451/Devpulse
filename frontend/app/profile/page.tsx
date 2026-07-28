@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { updateProfile, uploadAvatar, updatePrivacy } from "@/lib/api";
 
@@ -159,6 +160,18 @@ export default function MyProfilePage() {
             </button>
           </div>
         </div>
+
+        {/* Blocked Users — link out to the dedicated management page */}
+        <Link
+          href="/blocked"
+          className="flex items-center justify-between gap-4 bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg hover:border-outline transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[20px] text-on-surface-variant">block</span>
+            <span className="text-label-lg font-bold text-on-surface">Blocked Users</span>
+          </div>
+          <span className="material-symbols-outlined text-on-surface-variant text-[20px]">chevron_right</span>
+        </Link>
 
         <form onSubmit={handleSubmit} className="bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg space-y-6">
           <div className="flex flex-col gap-4">

@@ -8,6 +8,7 @@ from app.core.deps import CurrentUser
 from app.models.user import User
 from app.models.follow import Follow
 from app.models.follow_request import FollowRequest
+from app.models.block import Block
 from app.models.signed_prekey import SignedPreKey
 from app.models.one_time_prekey import OneTimePreKey
 from app.schemas.user_profile import UserProfileUpdate
@@ -37,8 +38,6 @@ class KeyBundleUpload(BaseModel):
 class PrivacyUpdate(BaseModel):
     is_private: bool
 
-
-# ── Fixed-path routes (MUST come before /{username} catch-all) ────────────────
 
 @router.get("/search")
 def search_users(
@@ -73,18 +72,23 @@ def explore_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=50),
 ):
-    """
-    Paginated list of all users (except the current user), for the Explore
-    page. Includes each user's follow state relative to the current user so
-    the frontend can render the right button (Follow / Requested / Following).
-    """
+    blocked_subquery = select(Block.blocked_id).where(Block.blocker_id == current_user.id).union(
+        select(Block.blocker_id).where(Block.blocked_id == current_user.id)
+    )
+
     total = db.scalar(
-        select(func.count()).select_from(User).where(User.id != current_user.id)
+        select(func.count()).select_from(User).where(
+            User.id != current_user.id,
+            User.id.notin_(blocked_subquery),
+        )
     ) or 0
 
     users = db.execute(
         select(User)
-        .where(User.id != current_user.id)
+        .where(
+            User.id != current_user.id,
+            User.id.notin_(blocked_subquery),
+        )
         .order_by(User.created_at.desc())
         .offset(skip)
         .limit(limit)
@@ -132,6 +136,136 @@ def explore_users(
         "users": result,
         "total": total,
         "has_more": skip + len(users) < total,
+    }
+
+
+@router.get("/me/blocked")
+def get_blocked_users(
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    """Lists users the current user has blocked."""
+    blocks = db.execute(
+        select(Block).where(Block.blocker_id == current_user.id).order_by(Block.created_at.desc())
+    ).scalars().all()
+
+    return [
+        {
+            "id": b.blocked.id,
+            "username": b.blocked.username,
+            "full_name": b.blocked.full_name,
+            "avatar_url": b.blocked.avatar_url,
+            "blocked_at": b.created_at,
+        }
+        for b in blocks
+    ]
+
+
+@router.post("/{username}/block")
+def toggle_block(
+    username: str,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    """
+    Toggles blocking a user. Blocking someone:
+    - Removes any existing Follow relationship in EITHER direction
+    - Removes any pending FollowRequest in EITHER direction
+    - Prevents either user from seeing the other's posts (enforced in
+      the posts router, not here)
+    """
+    if current_user.username == username:
+        raise HTTPException(status_code=400, detail="You cannot block yourself")
+
+    target_user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    existing_block = db.execute(
+        select(Block).where(Block.blocker_id == current_user.id, Block.blocked_id == target_user.id)
+    ).scalar_one_or_none()
+
+    if existing_block:
+        db.delete(existing_block)
+        db.commit()
+        return {"status": "unblocked"}
+
+    # Remove any follow relationship in either direction.
+    db.execute(
+        delete(Follow).where(
+            ((Follow.follower_id == current_user.id) & (Follow.following_id == target_user.id))
+            | ((Follow.follower_id == target_user.id) & (Follow.following_id == current_user.id))
+        )
+    )
+    # Remove any pending follow request in either direction.
+    db.execute(
+        delete(FollowRequest).where(
+            ((FollowRequest.requester_id == current_user.id) & (FollowRequest.target_id == target_user.id))
+            | ((FollowRequest.requester_id == target_user.id) & (FollowRequest.target_id == current_user.id))
+        )
+    )
+
+    db.add(Block(blocker_id=current_user.id, blocked_id=target_user.id))
+    db.commit()
+    return {"status": "blocked"}
+
+
+@router.get("/{username}")
+def get_user_profile(
+    username: str,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    followers_count = db.scalar(select(func.count()).select_from(Follow).where(Follow.following_id == user.id)) or 0
+    following_count = db.scalar(select(func.count()).select_from(Follow).where(Follow.follower_id == user.id)) or 0
+
+    is_following = False
+    has_pending_request = False
+    is_blocked_by_me = False
+    has_blocked_me = False
+
+    if current_user:
+        follow_record = db.execute(
+            select(Follow).where(Follow.follower_id == current_user.id, Follow.following_id == user.id)
+        ).scalar_one_or_none()
+        is_following = follow_record is not None
+
+        if not is_following:
+            pending = db.execute(
+                select(FollowRequest).where(
+                    FollowRequest.requester_id == current_user.id,
+                    FollowRequest.target_id == user.id,
+                    FollowRequest.status == "pending",
+                )
+            ).scalar_one_or_none()
+            has_pending_request = pending is not None
+
+        is_blocked_by_me = db.execute(
+            select(Block).where(Block.blocker_id == current_user.id, Block.blocked_id == user.id)
+        ).scalar_one_or_none() is not None
+
+        has_blocked_me = db.execute(
+            select(Block).where(Block.blocker_id == user.id, Block.blocked_id == current_user.id)
+        ).scalar_one_or_none() is not None
+
+    return {
+        "id": user.id,
+        "username": user.username,
+        "full_name": user.full_name,
+        "avatar_url": user.avatar_url,
+        "bio": user.bio,
+        "created_at": user.created_at,
+        "followers_count": followers_count,
+        "following_count": following_count,
+        "is_following": is_following,
+        "is_private": user.is_private,
+        "has_pending_request": has_pending_request,
+        "is_blocked_by_me": is_blocked_by_me,
+        "has_blocked_me": has_blocked_me,
     }
 
 
@@ -226,6 +360,108 @@ def upload_key_bundle(
     return {"status": "ok", "one_time_prekeys_uploaded": len(body.one_time_prekeys)}
 
 
+@router.get("/{username}/key-bundle")
+def get_key_bundle(
+    username: str,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not user.identity_public_key or not user.registration_id:
+        raise HTTPException(status_code=404, detail="This user hasn't set up encryption yet")
+
+    signed_prekey = db.execute(
+        select(SignedPreKey).where(SignedPreKey.user_id == user.id)
+    ).scalar_one_or_none()
+    if not signed_prekey:
+        raise HTTPException(status_code=404, detail="This user hasn't set up encryption yet")
+
+    one_time_prekey = db.execute(
+        select(OneTimePreKey).where(OneTimePreKey.user_id == user.id).limit(1)
+    ).scalar_one_or_none()
+
+    bundle = {
+        "identity_key": user.identity_public_key,
+        "registration_id": user.registration_id,
+        "signed_prekey": {
+            "key_id": signed_prekey.key_id,
+            "public_key": signed_prekey.public_key,
+            "signature": signed_prekey.signature,
+        },
+        "one_time_prekey": None,
+    }
+
+    if one_time_prekey:
+        bundle["one_time_prekey"] = {
+            "key_id": one_time_prekey.key_id,
+            "public_key": one_time_prekey.public_key,
+        }
+        db.delete(one_time_prekey)
+        db.commit()
+
+    return bundle
+
+
+@router.post("/{username}/follow")
+def toggle_follow(
+    username: str,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    if current_user.username == username:
+        raise HTTPException(status_code=400, detail="You cannot follow yourself")
+
+    target_user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    is_blocked = db.execute(
+        select(Block).where(
+            ((Block.blocker_id == current_user.id) & (Block.blocked_id == target_user.id))
+            | ((Block.blocker_id == target_user.id) & (Block.blocked_id == current_user.id))
+        )
+    ).scalar_one_or_none()
+    if is_blocked:
+        raise HTTPException(status_code=403, detail="Cannot follow this user")
+
+    existing_follow = db.execute(
+        select(Follow).where(Follow.follower_id == current_user.id, Follow.following_id == target_user.id)
+    ).scalar_one_or_none()
+
+    if existing_follow:
+        db.delete(existing_follow)
+        db.commit()
+        return {"status": "unfollowed"}
+
+    if not target_user.is_private:
+        new_follow = Follow(follower_id=current_user.id, following_id=target_user.id)
+        db.add(new_follow)
+        db.commit()
+        return {"status": "followed"}
+
+    existing_request = db.execute(
+        select(FollowRequest).where(
+            FollowRequest.requester_id == current_user.id,
+            FollowRequest.target_id == target_user.id,
+        )
+    ).scalar_one_or_none()
+
+    if existing_request and existing_request.status == "pending":
+        db.delete(existing_request)
+        db.commit()
+        return {"status": "request_cancelled"}
+
+    if existing_request:
+        existing_request.status = "pending"
+    else:
+        db.add(FollowRequest(requester_id=current_user.id, target_id=target_user.id))
+
+    db.commit()
+    return {"status": "requested"}
+
+
 @router.get("/me/follow-requests")
 def get_incoming_follow_requests(
     current_user: CurrentUser,
@@ -297,147 +533,6 @@ def reject_follow_request(
     return {"status": "rejected"}
 
 
-# ── Parameterized {username} routes (MUST come after all fixed-path routes) ───
-
-@router.get("/{username}")
-def get_user_profile(
-    username: str,
-    current_user: CurrentUser,
-    db: Session = Depends(get_db)
-):
-    user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    followers_count = db.scalar(select(func.count()).select_from(Follow).where(Follow.following_id == user.id)) or 0
-    following_count = db.scalar(select(func.count()).select_from(Follow).where(Follow.follower_id == user.id)) or 0
-
-    is_following = False
-    has_pending_request = False
-    if current_user:
-        follow_record = db.execute(
-            select(Follow).where(Follow.follower_id == current_user.id, Follow.following_id == user.id)
-        ).scalar_one_or_none()
-        is_following = follow_record is not None
-
-        if not is_following:
-            pending = db.execute(
-                select(FollowRequest).where(
-                    FollowRequest.requester_id == current_user.id,
-                    FollowRequest.target_id == user.id,
-                    FollowRequest.status == "pending",
-                )
-            ).scalar_one_or_none()
-            has_pending_request = pending is not None
-
-    return {
-        "id": user.id,
-        "username": user.username,
-        "full_name": user.full_name,
-        "avatar_url": user.avatar_url,
-        "bio": user.bio,
-        "created_at": user.created_at,
-        "followers_count": followers_count,
-        "following_count": following_count,
-        "is_following": is_following,
-        "is_private": user.is_private,
-        "has_pending_request": has_pending_request,
-    }
-
-
-@router.get("/{username}/key-bundle")
-def get_key_bundle(
-    username: str,
-    current_user: CurrentUser,
-    db: Session = Depends(get_db)
-):
-    user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if not user.identity_public_key or not user.registration_id:
-        raise HTTPException(status_code=404, detail="This user hasn't set up encryption yet")
-
-    signed_prekey = db.execute(
-        select(SignedPreKey).where(SignedPreKey.user_id == user.id)
-    ).scalar_one_or_none()
-    if not signed_prekey:
-        raise HTTPException(status_code=404, detail="This user hasn't set up encryption yet")
-
-    one_time_prekey = db.execute(
-        select(OneTimePreKey).where(OneTimePreKey.user_id == user.id).limit(1)
-    ).scalar_one_or_none()
-
-    bundle = {
-        "identity_key": user.identity_public_key,
-        "registration_id": user.registration_id,
-        "signed_prekey": {
-            "key_id": signed_prekey.key_id,
-            "public_key": signed_prekey.public_key,
-            "signature": signed_prekey.signature,
-        },
-        "one_time_prekey": None,
-    }
-
-    if one_time_prekey:
-        bundle["one_time_prekey"] = {
-            "key_id": one_time_prekey.key_id,
-            "public_key": one_time_prekey.public_key,
-        }
-        db.delete(one_time_prekey)
-        db.commit()
-
-    return bundle
-
-
-@router.post("/{username}/follow")
-def toggle_follow(
-    username: str,
-    current_user: CurrentUser,
-    db: Session = Depends(get_db)
-):
-    if current_user.username == username:
-        raise HTTPException(status_code=400, detail="You cannot follow yourself")
-
-    target_user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
-    if not target_user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    existing_follow = db.execute(
-        select(Follow).where(Follow.follower_id == current_user.id, Follow.following_id == target_user.id)
-    ).scalar_one_or_none()
-
-    if existing_follow:
-        db.delete(existing_follow)
-        db.commit()
-        return {"status": "unfollowed"}
-
-    if not target_user.is_private:
-        new_follow = Follow(follower_id=current_user.id, following_id=target_user.id)
-        db.add(new_follow)
-        db.commit()
-        return {"status": "followed"}
-
-    existing_request = db.execute(
-        select(FollowRequest).where(
-            FollowRequest.requester_id == current_user.id,
-            FollowRequest.target_id == target_user.id,
-        )
-    ).scalar_one_or_none()
-
-    if existing_request and existing_request.status == "pending":
-        db.delete(existing_request)
-        db.commit()
-        return {"status": "request_cancelled"}
-
-    if existing_request:
-        existing_request.status = "pending"
-    else:
-        db.add(FollowRequest(requester_id=current_user.id, target_id=target_user.id))
-
-    db.commit()
-    return {"status": "requested"}
-
-
 @router.get("/{username}/followers")
 def get_followers(
     username: str,
@@ -466,4 +561,4 @@ def get_following(
         select(User).join(Follow, Follow.following_id == User.id).where(Follow.follower_id == target_user.id)
     ).scalars().all()
 
-    return [{"id": u.id, "username": u.username, "full_name": u.full_name, "avatar_url": u.avatar_url} for u in following]
+    return [{"id": u.id, "username": u.username, "full_name": u.full_name, "avatar_url": u.avatar_url} for u in following]

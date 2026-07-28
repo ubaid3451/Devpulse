@@ -20,6 +20,7 @@ import {
   uploadChatImage,
   startDirectConversation,
   hideConversation,
+  toggleBlock,
 } from "@/lib/api";
 
 export default function ChatPage() {
@@ -49,6 +50,33 @@ export default function ChatPage() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [togglingBlock, setTogglingBlock] = useState(false);
+
+  const handleToggleBlockUser = async (username: string) => {
+    setTogglingBlock(true);
+    try {
+      const res = await toggleBlock(username);
+      const isNowBlocked = res.status === "blocked";
+      setConversations((prev) =>
+        prev.map((c) => {
+          const other = c.participants[0];
+          if (!c.is_group && other?.username === username) {
+            return {
+              ...c,
+              is_blocked_by_me: isNowBlocked,
+              is_blocked: isNowBlocked || !!c.has_blocked_me,
+            };
+          }
+          return c;
+        })
+      );
+      refreshConversations();
+    } catch (err) {
+      console.error("Failed to toggle block status", err);
+    } finally {
+      setTogglingBlock(false);
+    }
+  };
 
   const confirmDelete = async (conversationId: string) => {
     setDeletingId(conversationId);
@@ -519,9 +547,24 @@ export default function ChatPage() {
 
                         {isMenuOpen && (
                           <div
-                            className="absolute right-0 top-9 z-20 w-36 overflow-hidden rounded-lg border border-outline-variant/40 bg-[#1e2025] shadow-xl"
+                            className="absolute right-0 top-9 z-20 w-40 overflow-hidden rounded-lg border border-outline-variant/40 bg-[#1e2025] shadow-xl"
                             onClick={(e) => e.stopPropagation()}
                           >
+                            {!conv.is_group && other && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  handleToggleBlockUser(other.username);
+                                }}
+                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-on-surface hover:bg-white/10 transition-colors border-b border-outline-variant/20"
+                              >
+                                <span className="material-symbols-outlined text-[16px] text-red-400">
+                                  {conv.is_blocked_by_me ? "lock_open" : "block"}
+                                </span>
+                                {conv.is_blocked_by_me ? "Unblock user" : "Block user"}
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => {
@@ -611,7 +654,24 @@ export default function ChatPage() {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-4 text-on-surface-variant">
+                <div className="flex items-center gap-3 text-on-surface-variant">
+                  {!activeConversation?.is_group && activeOtherParticipant && (
+                    <button
+                      onClick={() => handleToggleBlockUser(activeOtherParticipant.username)}
+                      disabled={togglingBlock}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                        activeConversation?.is_blocked_by_me
+                          ? "bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/40"
+                          : "bg-surface-variant/80 hover:bg-surface-variant text-on-surface-variant hover:text-on-surface border border-outline-variant/30"
+                      }`}
+                      title={activeConversation?.is_blocked_by_me ? "Unblock user" : "Block user"}
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        {activeConversation?.is_blocked_by_me ? "lock_open" : "block"}
+                      </span>
+                      {activeConversation?.is_blocked_by_me ? "Unblock" : "Block"}
+                    </button>
+                  )}
                   <button onClick={() => alert("Audio calls coming soon!")} className="hover:text-primary transition-colors"><span className="material-symbols-outlined text-[22px]">call</span></button>
                   <button onClick={() => alert("Video calls coming soon!")} className="hover:text-primary transition-colors"><span className="material-symbols-outlined text-[22px]">videocam</span></button>
                   <button onClick={() => alert("Info panel coming soon!")} className="hover:text-primary transition-colors"><span className="material-symbols-outlined text-[22px]">info</span></button>
@@ -726,85 +786,110 @@ export default function ChatPage() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Chat Input */}
-              <div className="p-4 bg-[#0b0d10] border-t border-outline-variant/20">
-                <div className="bg-[#111318] border border-outline-variant/40 rounded-xl overflow-hidden focus-within:border-primary/50 transition-colors">
-                  <div className="px-3 py-2 border-b border-outline-variant/20 flex gap-2 text-on-surface-variant relative">
-                    <button onClick={() => insertTextAtCursor("**", "**")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm">B</button>
-                    <button onClick={() => insertTextAtCursor("*", "*")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm italic">I</button>
-                    <button onClick={() => insertTextAtCursor("`", "`")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors text-sm">&lt; &gt;</button>
-                    <button onClick={() => insertTextAtCursor("[", "](url)")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"><span className="material-symbols-outlined text-[16px]">link</span></button>
-                    <button
-                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                      className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">sentiment_satisfied</span>
-                    </button>
-
-                    {showEmojiPicker && (
-                      <div className="absolute bottom-full left-0 mb-2 z-30">
-                        <EmojiPicker
-                          onEmojiClick={(e) => setInputText((prev) => prev + e.emoji)}
-                          theme={Theme.DARK}
-                        />
-                      </div>
+              {/* Chat Input or Blocked Notice */}
+              {activeConversation?.is_blocked ? (
+                <div className="p-4 bg-[#0b0d10] border-t border-outline-variant/20 flex items-center justify-center">
+                  <div className="text-sm font-medium text-on-surface-variant/80 flex flex-wrap items-center justify-between gap-4 bg-[#1e2025] px-5 py-3.5 rounded-xl border border-outline-variant/30 w-full max-w-xl shadow-lg">
+                    <div className="flex items-center gap-2.5 text-on-surface">
+                      <span className="material-symbols-outlined text-[20px] text-red-400 shrink-0">block</span>
+                      <span>
+                        {activeConversation.is_blocked_by_me
+                          ? `You have blocked @${activeOtherParticipant?.username || "this user"}.`
+                          : "You can't message a blocked user."}
+                      </span>
+                    </div>
+                    {activeConversation.is_blocked_by_me && activeOtherParticipant && (
+                      <button
+                        onClick={() => handleToggleBlockUser(activeOtherParticipant.username)}
+                        disabled={togglingBlock}
+                        className="px-3.5 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 rounded-lg text-xs font-bold transition-colors shrink-0 flex items-center gap-1"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">lock_open</span>
+                        Unblock User
+                      </button>
                     )}
                   </div>
+                </div>
+              ) : (
+                <div className="p-4 bg-[#0b0d10] border-t border-outline-variant/20">
+                  <div className="bg-[#111318] border border-outline-variant/40 rounded-xl overflow-hidden focus-within:border-primary/50 transition-colors">
+                    <div className="px-3 py-2 border-b border-outline-variant/20 flex gap-2 text-on-surface-variant relative">
+                      <button onClick={() => insertTextAtCursor("**", "**")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm">B</button>
+                      <button onClick={() => insertTextAtCursor("*", "*")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm italic">I</button>
+                      <button onClick={() => insertTextAtCursor("`", "`")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors text-sm">&lt; &gt;</button>
+                      <button onClick={() => insertTextAtCursor("[", "](url)")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"><span className="material-symbols-outlined text-[16px]">link</span></button>
+                      <button
+                        onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                        className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">sentiment_satisfied</span>
+                      </button>
 
-                  {attachedImage && (
-                    <div className="px-4 py-2 bg-surface-variant/20 border-b border-outline-variant/20 flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-sm text-primary truncate">
-                        <span className="material-symbols-outlined text-[18px]">image</span>
-                        {attachedImage.name}
+                      {showEmojiPicker && (
+                        <div className="absolute bottom-full left-0 mb-2 z-30">
+                          <EmojiPicker
+                            onEmojiClick={(e) => setInputText((prev) => prev + e.emoji)}
+                            theme={Theme.DARK}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {attachedImage && (
+                      <div className="px-4 py-2 bg-surface-variant/20 border-b border-outline-variant/20 flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm text-primary truncate">
+                          <span className="material-symbols-outlined text-[18px]">image</span>
+                          {attachedImage.name}
+                        </div>
+                        <button onClick={() => setAttachedImage(null)} className="text-on-surface-variant hover:text-red-400">
+                          <span className="material-symbols-outlined text-[18px]">close</span>
+                        </button>
                       </div>
-                      <button onClick={() => setAttachedImage(null)} className="text-on-surface-variant hover:text-red-400">
-                        <span className="material-symbols-outlined text-[18px]">close</span>
+                    )}
+
+                    <div className="flex items-end p-2 gap-2">
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        className="hidden"
+                        accept="image/*"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            setAttachedImage(e.target.files[0]);
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="p-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/50 rounded-lg transition-colors"
+                      >
+                        <span className="material-symbols-outlined">attach_file</span>
+                      </button>
+                      <textarea
+                        ref={textareaRef}
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            sendChatMessage();
+                          }
+                        }}
+                        placeholder="Write a message or paste code..."
+                        className="flex-1 bg-transparent border-none resize-none max-h-32 min-h-[44px] py-3 focus:outline-none focus:ring-0 text-[15px]"
+                        rows={1}
+                      />
+                      <button
+                        onClick={sendChatMessage}
+                        disabled={(!inputText.trim() && !attachedImage) || isUploading}
+                        className="p-3 bg-[#71d4ff] text-[#003548] rounded-lg disabled:opacity-50 hover:brightness-110 transition-colors shrink-0 mb-1"
+                      >
+                        <span className="material-symbols-outlined text-[20px]">{isUploading ? "hourglass_empty" : "send"}</span>
                       </button>
                     </div>
-                  )}
-
-                  <div className="flex items-end p-2 gap-2">
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      className="hidden"
-                      accept="image/*"
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files[0]) {
-                          setAttachedImage(e.target.files[0]);
-                        }
-                      }}
-                    />
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="p-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/50 rounded-lg transition-colors"
-                    >
-                      <span className="material-symbols-outlined">attach_file</span>
-                    </button>
-                    <textarea
-                      ref={textareaRef}
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          sendChatMessage();
-                        }
-                      }}
-                      placeholder="Write a message or paste code..."
-                      className="flex-1 bg-transparent border-none resize-none max-h-32 min-h-[44px] py-3 focus:outline-none focus:ring-0 text-[15px]"
-                      rows={1}
-                    />
-                    <button
-                      onClick={sendChatMessage}
-                      disabled={(!inputText.trim() && !attachedImage) || isUploading}
-                      className="p-3 bg-[#71d4ff] text-[#003548] rounded-lg disabled:opacity-50 hover:brightness-110 transition-colors shrink-0 mb-1"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">{isUploading ? "hourglass_empty" : "send"}</span>
-                    </button>
                   </div>
                 </div>
-              </div>
+              )}
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-on-surface-variant/50">

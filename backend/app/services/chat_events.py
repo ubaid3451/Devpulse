@@ -1,14 +1,15 @@
 """
-Handlers for inbound WebSocket events (reactions, new chat messages) — group-chat capable, E2EE-aware.
+Handlers for inbound WebSocket events (reactions, new chat messages) — group-chat capable, E2EE-aware, block-aware.
 """
 
-from sqlalchemy import select
+from sqlalchemy import select, or_, and_
 from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.models.message import Message
 from app.models.message_reaction import MessageReaction
 from app.models.conversation_participant import ConversationParticipant
+from app.models.block import Block
 from app.services.connection_manager import manager
 
 
@@ -19,6 +20,21 @@ def _participant_ids(db: Session, conversation_id: str) -> list[str]:
         )
     ).scalars().all()
     return list(rows)
+
+
+def _is_blocked_with_any(db: Session, user_id: str, other_ids: list[str]) -> bool:
+    """True if a block exists (either direction) between user_id and ANY of other_ids."""
+    if not other_ids:
+        return False
+    existing = db.execute(
+        select(Block).where(
+            or_(
+                and_(Block.blocker_id == user_id, Block.blocked_id.in_(other_ids)),
+                and_(Block.blocked_id == user_id, Block.blocker_id.in_(other_ids)),
+            )
+        )
+    ).scalar_one_or_none()
+    return existing is not None
 
 
 async def handle_reaction_event(db: Session, user: User, data: dict) -> None:
@@ -70,9 +86,21 @@ async def handle_chat_message_event(db: Session, user: User, data: dict) -> None
     if not is_participant:
         return
 
-    # content is base64 ciphertext for E2EE conversations, plaintext otherwise.
-    # The server never distinguishes or inspects which — it just stores and
-    # relays whatever the client sends, plus the iv needed to decrypt it.
+    # Block check: don't let a message through if the sender is blocked by
+    # (or has blocked) ANY other participant in this conversation. For 1-on-1
+    # chats this is simply "the other person"; written generically so it
+    # also covers group chats correctly if/when those support blocking too.
+    other_participant_ids = [
+        pid for pid in _participant_ids(db, conversation_id) if pid != user.id
+    ]
+    if _is_blocked_with_any(db, user.id, other_participant_ids):
+        # Silently drop the message rather than raising an exception that
+        # could crash the WebSocket connection — the sender's own client
+        # already shouldn't be showing a send box for a blocked
+        # conversation (see frontend), so reaching this path means someone
+        # is calling the API directly rather than through the normal UI.
+        return
+
     new_msg = Message(
         conversation_id=conversation_id,
         sender_id=user.id,

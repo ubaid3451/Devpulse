@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { PostResponse, toggleLike, repostPost, deletePost, archivePost, unarchivePost } from "@/lib/api";
+import { PostResponse, toggleLike, repostPost, deletePost, archivePost, unarchivePost, toggleBlock } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
 function timeAgo(dateString: string) {
@@ -115,6 +115,21 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
 
   const avatarInitials = (displayPost.author.full_name?.substring(0, 2) || displayPost.author.username.substring(0, 2)).toUpperCase();
 
+  const handleBlockAuthor = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (!confirm(`Are you sure you want to block @${displayPost.author.username}?`)) return;
+    try {
+      await toggleBlock(displayPost.author.username);
+      if (onLikeToggle) {
+        onLikeToggle();
+      }
+    } catch (err) {
+      console.error("Failed to block user", err);
+    }
+  };
+
   return (
     <Link href={`/posts/${post.id}`}>
       <article className={`bg-surface-container-low border rounded-xl p-md lg:p-lg hover:border-outline transition-all group block ${displayPost.is_archived ? "border-dashed border-outline-variant/60 opacity-70" : "border-outline-variant"}`}>
@@ -157,46 +172,46 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
             </div>
           </div>
 
-          {canManage ? (
-            <div className="relative">
-              <button
-                className="text-on-surface-variant hover:text-on-surface transition-colors"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setMenuOpen((v) => !v);
-                }}
-                title="Post options"
-              >
-                <span className="material-symbols-outlined">more_horiz</span>
-              </button>
+          <div className="relative">
+            <button
+              className="text-on-surface-variant hover:text-on-surface transition-colors p-1 rounded-full hover:bg-surface-variant/40"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen((v) => !v);
+              }}
+              title="Options"
+            >
+              <span className="material-symbols-outlined">more_horiz</span>
+            </button>
 
-              {menuOpen && (
-                <div
-                  className="absolute right-0 mt-1 w-44 bg-surface-container-lowest border border-outline-variant rounded-lg shadow-xl z-10 overflow-hidden"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {canEditOrArchive && (
-                    <button
-                      onClick={handleEdit}
-                      className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-on-surface hover:bg-surface-variant/40 transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">edit</span>
-                      Edit
-                    </button>
-                  )}
-                  {canEditOrArchive && (
-                    <button
-                      onClick={handleToggleArchive}
-                      disabled={isArchiving}
-                      className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-on-surface hover:bg-surface-variant/40 transition-colors disabled:opacity-50"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">
-                        {displayPost.is_archived ? "unarchive" : "archive"}
-                      </span>
-                      {displayPost.is_archived ? "Unarchive" : "Archive"}
-                    </button>
-                  )}
+            {menuOpen && (
+              <div
+                className="absolute right-0 mt-1 w-48 bg-surface-container-lowest border border-outline-variant rounded-lg shadow-xl z-10 overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {canEditOrArchive && (
+                  <button
+                    onClick={handleEdit}
+                    className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-on-surface hover:bg-surface-variant/40 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">edit</span>
+                    Edit
+                  </button>
+                )}
+                {canEditOrArchive && (
+                  <button
+                    onClick={handleToggleArchive}
+                    disabled={isArchiving}
+                    className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-on-surface hover:bg-surface-variant/40 transition-colors disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      {displayPost.is_archived ? "unarchive" : "archive"}
+                    </span>
+                    {displayPost.is_archived ? "Unarchive" : "Archive"}
+                  </button>
+                )}
+                {canManage && (
                   <button
                     onClick={handleDelete}
                     className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-error hover:bg-error-container/20 transition-colors"
@@ -204,14 +219,19 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
                     <span className="material-symbols-outlined text-[18px]">delete</span>
                     Delete
                   </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <button className="text-on-surface-variant hover:text-on-surface" onClick={(e) => e.preventDefault()}>
-              <span className="material-symbols-outlined">more_horiz</span>
-            </button>
-          )}
+                )}
+                {!isOriginalAuthor && (
+                  <button
+                    onClick={handleBlockAuthor}
+                    className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-error hover:bg-error-container/20 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">block</span>
+                    Block @{displayPost.author.username}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {displayPost.content && (

@@ -4,14 +4,29 @@ Read-side queries for conversations and chat history (group-chat capable).
 
 from typing import List, Optional
 
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, or_, and_
 from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.models.message import Message
 from app.models.conversation import Conversation
 from app.models.conversation_participant import ConversationParticipant
+from app.models.block import Block
 from app.services.connection_manager import manager
+
+
+def _is_blocked_with_any(db: Session, user_id: str, other_ids: List[str]) -> bool:
+    if not other_ids:
+        return False
+    existing = db.execute(
+        select(Block).where(
+            or_(
+                and_(Block.blocker_id == user_id, Block.blocked_id.in_(other_ids)),
+                and_(Block.blocked_id == user_id, Block.blocker_id.in_(other_ids)),
+            )
+        )
+    ).scalar_one_or_none()
+    return existing is not None
 
 
 def get_online_user_ids() -> List[str]:
@@ -54,6 +69,26 @@ def get_conversations(db: Session, current_user: User) -> List[dict]:
             )
         ).scalars().all()
 
+        other_ids = [u.id for u in other_participants]
+        is_blocked_by_me = False
+        has_blocked_me = False
+        if other_ids:
+            is_blocked_by_me = db.execute(
+                select(Block).where(
+                    Block.blocker_id == current_user.id,
+                    Block.blocked_id.in_(other_ids),
+                )
+            ).scalar_one_or_none() is not None
+
+            has_blocked_me = db.execute(
+                select(Block).where(
+                    Block.blocked_id == current_user.id,
+                    Block.blocker_id.in_(other_ids),
+                )
+            ).scalar_one_or_none() is not None
+
+        is_blocked = is_blocked_by_me or has_blocked_me
+
         result.append({
             "conversation_id": convo.id,
             "is_group": convo.is_group,
@@ -72,6 +107,9 @@ def get_conversations(db: Session, current_user: User) -> List[dict]:
             "last_message_msg_type": last_message.msg_type if last_message else None,
             "last_message_encrypted": bool(last_message and last_message.msg_type),
             "last_message_at": last_message.created_at if last_message else convo.created_at,
+            "is_blocked": is_blocked,
+            "is_blocked_by_me": is_blocked_by_me,
+            "has_blocked_me": has_blocked_me,
         })
 
     result.sort(key=lambda x: x["last_message_at"], reverse=True)

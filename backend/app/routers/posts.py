@@ -10,6 +10,7 @@ from app.core.deps import CurrentUser
 from app.models.post import Post, Comment, Like
 from app.models.user import User
 from app.models.follow import Follow
+from app.models.block import Block
 from app.schemas.post import (
     PostCreate, PostUpdate, PostResponse,
     CommentCreate, CommentResponse, PostDetailResponse
@@ -59,12 +60,33 @@ def get_posts(
         .order_by(desc(Post.created_at))
     )
 
+    # IDs of users the current user has blocked, or who have blocked the
+    # current user — posts from any of these users are hidden regardless of
+    # who initiated the block (mutual invisibility).
+    blocked_either_direction_subquery = select(Block.blocked_id).where(Block.blocker_id == current_user.id).union(
+        select(Block.blocker_id).where(Block.blocked_id == current_user.id)
+    )
+
     if username:
         target_user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
         if not target_user:
             raise HTTPException(status_code=404, detail="User not found")
 
         is_own_profile = target_user.id == current_user.id
+
+        if not is_own_profile:
+            is_blocked = db.execute(
+                select(Block).where(
+                    ((Block.blocker_id == current_user.id) & (Block.blocked_id == target_user.id))
+                    | ((Block.blocker_id == target_user.id) & (Block.blocked_id == current_user.id))
+                )
+            ).scalar_one_or_none()
+            if is_blocked:
+                # Blocked (either direction) — show no posts, same as a
+                # private account you don't follow. Don't leak WHICH
+                # direction the block is via a different error/response shape.
+                return []
+
         if target_user.is_private and not is_own_profile:
             is_follower = db.execute(
                 select(Follow).where(
@@ -73,32 +95,27 @@ def get_posts(
                 )
             ).scalar_one_or_none()
             if not is_follower:
-                # Private account, viewer doesn't follow them — return no
-                # posts rather than a 403, so the profile page can still
-                # render (bio, follower counts, the "Request to Follow"
-                # button) while the post list itself stays empty.
                 return []
 
         query = query.join(User, Post.author_id == User.id).where(User.username == username)
     else:
         # General feed (no username filter): exclude posts from private
-        # accounts unless the viewer is the author or already follows them.
-        # Without this, a private account's posts were only hidden on their
-        # own profile page but still leaked through the main feed.
+        # accounts unless the viewer is the author or already follows them,
+        # AND exclude posts from anyone involved in a block with the viewer
+        # (either direction).
         followed_ids_subquery = (
             select(Follow.following_id).where(Follow.follower_id == current_user.id)
         )
         query = query.join(User, Post.author_id == User.id).where(
-            (User.is_private.is_(False))
-            | (User.id == current_user.id)
-            | (User.id.in_(followed_ids_subquery))
+            (
+                (User.is_private.is_(False))
+                | (User.id == current_user.id)
+                | (User.id.in_(followed_ids_subquery))
+            )
+            & (User.id.notin_(blocked_either_direction_subquery))
         )
 
-    # Archived posts are hidden from feeds by default. Only show them when
-    # explicitly requested AND the requester is viewing their own profile —
-    # nobody should see another user's archived posts.
-    show_archived = include_archived and username is not None and username == current_user.username
-    if not show_archived:
+    if not (username and username == current_user.username and include_archived):
         query = query.where(Post.is_archived.is_(False))
 
     query = query.offset(skip).limit(limit)
@@ -126,7 +143,6 @@ def create_post(
 ):
     image_url = None
     if image:
-        # Save to local uploads directory (backend/uploads)
         uploads_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
         os.makedirs(uploads_dir, exist_ok=True)
         ext = os.path.splitext(image.filename)[1] if image.filename else ""
@@ -186,6 +202,16 @@ def get_post(
 
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
+
+    if post.author_id != current_user.id:
+        is_blocked = db.execute(
+            select(Block).where(
+                ((Block.blocker_id == current_user.id) & (Block.blocked_id == post.author_id))
+                | ((Block.blocker_id == post.author_id) & (Block.blocked_id == current_user.id))
+            )
+        ).scalar_one_or_none()
+        if is_blocked:
+            raise HTTPException(status_code=404, detail="Post not found")
 
     # Archived posts are only visible to their owner
     if post.is_archived and post.author_id != current_user.id:
@@ -384,8 +410,6 @@ def delete_post(
     if post.author_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this post")
 
-    # Explicitly delete all reposts of this post
-    # This ensures reposts are removed even if the database doesn't enforce ON DELETE CASCADE
     db.execute(delete(Post).where(Post.repost_id == post_id))
 
     db.delete(post)

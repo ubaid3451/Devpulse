@@ -3,9 +3,16 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { getUserProfile, UserProfileResponse, getPosts, PostResponse, toggleFollow } from "@/lib/api";
+import {
+  getUserProfile,
+  UserProfileResponse,
+  getPosts,
+  PostResponse,
+  toggleFollow,
+} from "@/lib/api";
 import PostCard from "@/components/PostCard";
 import CreatePostModal from "@/components/CreatePostModal";
+import BlockButton from "@/components/BlockButton";
 
 export default function UserProfilePage({ params }: { params: { username: string } }) {
   const router = useRouter();
@@ -137,34 +144,51 @@ export default function UserProfilePage({ params }: { params: { username: string
               >
                 Edit Profile
               </button>
+            ) : profile.has_blocked_me ? (
+              <div className="text-body-md text-error font-medium flex items-center gap-2">
+                <span className="material-symbols-outlined text-[20px]">block</span>
+                You cannot view or interact with this account.
+              </div>
             ) : (
               <>
-                <button
-                  onClick={handleToggleFollow}
-                  className={`px-6 py-2 font-bold rounded-lg transition-colors flex items-center gap-2 ${
-                    profile.is_following || profile.has_pending_request
-                      ? "bg-surface-variant text-on-surface hover:bg-surface-container-high"
-                      : "bg-primary text-on-primary hover:brightness-110"
-                  }`}
-                >
-                  {profile.has_pending_request && (
-                    <span className="material-symbols-outlined text-[16px]">schedule</span>
-                  )}
-                  {profile.is_following
-                    ? "Unfollow"
-                    : profile.has_pending_request
-                    ? "Requested"
-                    : profile.is_private
-                    ? "Request to Follow"
-                    : "Follow"}
-                </button>
-                <button
-                  onClick={() => router.push(`/chat?user=${profile.username}`)}
-                  className="px-6 py-2 bg-secondary-container text-on-secondary-container font-bold rounded-lg hover:brightness-110 transition-colors flex items-center gap-2"
-                >
-                  <span className="material-symbols-outlined text-[18px]">chat</span>
-                  Message
-                </button>
+                {!profile.is_blocked_by_me && (
+                  <>
+                    <button
+                      onClick={handleToggleFollow}
+                      className={`px-6 py-2 font-bold rounded-lg transition-colors flex items-center gap-2 ${
+                        profile.is_following || profile.has_pending_request
+                          ? "bg-surface-variant text-on-surface hover:bg-surface-container-high"
+                          : "bg-primary text-on-primary hover:brightness-110"
+                      }`}
+                    >
+                      {profile.has_pending_request && (
+                        <span className="material-symbols-outlined text-[16px]">schedule</span>
+                      )}
+                      {profile.is_following
+                        ? "Unfollow"
+                        : profile.has_pending_request
+                        ? "Requested"
+                        : profile.is_private
+                        ? "Request to Follow"
+                        : "Follow"}
+                    </button>
+                    <button
+                      onClick={() => router.push(`/chat?user=${profile.username}`)}
+                      className="px-6 py-2 bg-secondary-container text-on-secondary-container font-bold rounded-lg hover:brightness-110 transition-colors flex items-center gap-2"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">chat</span>
+                      Message
+                    </button>
+                  </>
+                )}
+                <BlockButton
+                  username={profile.username}
+                  isBlockedByMe={!!profile.is_blocked_by_me}
+                  onChange={(blocked) => {
+                    setProfile((prev) => (prev ? { ...prev, is_blocked_by_me: blocked } : null));
+                    fetchProfileData(activeTab);
+                  }}
+                />
               </>
             )}
           </div>
@@ -199,7 +223,23 @@ export default function UserProfilePage({ params }: { params: { username: string
             </div>
           </div>
 
-          {profile.is_private && !isOwnProfile && !profile.is_following ? (
+          {profile.has_blocked_me ? (
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-xl text-center">
+              <span className="material-symbols-outlined text-5xl text-on-surface-variant mb-3">block</span>
+              <h3 className="text-title-md font-bold text-on-surface mb-1">Account Unavailable</h3>
+              <p className="text-body-md text-on-surface-variant">
+                You cannot view posts from @{profile.username}.
+              </p>
+            </div>
+          ) : profile.is_blocked_by_me ? (
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-xl text-center">
+              <span className="material-symbols-outlined text-5xl text-on-surface-variant mb-3">block</span>
+              <h3 className="text-title-md font-bold text-on-surface mb-1">You have blocked @{profile.username}</h3>
+              <p className="text-body-md text-on-surface-variant">
+                Unblock this account to view their posts.
+              </p>
+            </div>
+          ) : profile.is_private && !isOwnProfile && !profile.is_following ? (
             <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-xl text-center">
               <span className="material-symbols-outlined text-5xl text-on-surface-variant mb-3">lock</span>
               <h3 className="text-title-md font-bold text-on-surface mb-1">This account is private</h3>
