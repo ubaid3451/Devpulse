@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { PostResponse, toggleLike, repostPost, deletePost, archivePost, unarchivePost, toggleBlock } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -30,6 +31,7 @@ interface PostCardProps {
 
 export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) {
   const { user } = useAuth();
+  const router = useRouter();
   const displayPost = post.original_post || post;
   const [menuOpen, setMenuOpen] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
@@ -130,6 +132,13 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
     }
   };
 
+  const handleGoToProfile = (e: React.MouseEvent) => {
+    // Prevent navigation to post if clicking on user
+    e.preventDefault();
+    e.stopPropagation();
+    router.push(`/profile/${displayPost.author.username}`);
+  };
+
   return (
     <Link href={`/posts/${post.id}`}>
       <article className={`bg-surface-container-low border rounded-xl p-md lg:p-lg hover:border-outline transition-all group block ${displayPost.is_archived ? "border-dashed border-outline-variant/60 opacity-70" : "border-outline-variant"}`}>
@@ -159,11 +168,11 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
                 {displayPost.title}
               </h3>
               <div className="flex gap-2 items-center mt-0.5">
-                <span className="text-body-sm text-on-surface-variant hover:underline cursor-pointer" onClick={(e) => {
-                    // Prevent navigation to post if clicking on user
-                    e.stopPropagation();
-                }}>
-                  <Link href={`/profile/${displayPost.author.username}`}>@{displayPost.author.username}</Link>
+                <span
+                  className="text-body-sm text-on-surface-variant hover:underline cursor-pointer"
+                  onClick={handleGoToProfile}
+                >
+                  @{displayPost.author.username}
                 </span>
                 <span className="text-body-sm text-on-surface-variant">
                   • {formattedTime}

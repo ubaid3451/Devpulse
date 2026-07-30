@@ -4,6 +4,7 @@ import React, { Suspense, useCallback, useEffect, useRef, useState } from "react
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiPost, ApiError } from "@/lib/api";
 import type { AuthResponse } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 
 const OTP_LENGTH = 6;
 const RESEND_COOLDOWN = 60;
@@ -12,6 +13,7 @@ function VerifyOTPContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const email = searchParams.get("email") || "";
+  const { refreshUser } = useAuth();
 
   const [digits, setDigits] = useState<string[]>(Array(OTP_LENGTH).fill(""));
   const [isVerifying, setIsVerifying] = useState(false);
@@ -72,6 +74,14 @@ function VerifyOTPContent() {
       setIsVerifying(true);
       try {
         await apiPost<AuthResponse>("/auth/verify-otp", { email, code });
+        // The backend has now set the auth cookie, but AuthContext's `user`
+        // state doesn't know that yet — it was only populated once, on
+        // initial app load. Without this call, /feed would render with
+        // user === null until something else (like a manual refresh)
+        // happens to re-trigger that check. refreshUser() re-fetches
+        // /auth/me and updates context immediately, so the redirect below
+        // lands on a fully authenticated feed on the first try.
+        await refreshUser();
         setSuccess(true);
         setTimeout(() => router.push("/feed"), 1500);
       } catch (err) {
@@ -80,7 +90,7 @@ function VerifyOTPContent() {
         setIsVerifying(false);
       }
     },
-    [digits, email, router]
+    [digits, email, router, refreshUser]
   );
 
   const handleResend = useCallback(async () => {
