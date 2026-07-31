@@ -143,6 +143,8 @@ export interface PostDetailResponse extends PostResponse {
 }
 
 export interface UserProfileResponse {
+  has_blocked_me: any;
+  is_blocked_by_me: any;
   id: string;
   username: string;
   full_name: string;
@@ -154,16 +156,6 @@ export interface UserProfileResponse {
   is_following?: boolean;
   is_private?: boolean;
   has_pending_request?: boolean;
-  is_blocked_by_me?: boolean;
-  has_blocked_me?: boolean;
-}
-
-export interface BlockedUser {
-  id: string;
-  username: string;
-  full_name: string;
-  avatar_url: string | null;
-  blocked_at: string;
 }
 
 export interface FollowRequestResponse {
@@ -193,9 +185,6 @@ export interface ConversationResponse {
   last_message_msg_type: number | null;
   last_message_encrypted: boolean;
   last_message_at: string;
-  is_blocked?: boolean;
-  is_blocked_by_me?: boolean;
-  has_blocked_me?: boolean;
 }
 
 export interface ChatMessageResponse {
@@ -213,7 +202,6 @@ export interface ChatMessageResponse {
 export interface StartDirectConversationResponse {
   conversation_id: string;
   is_group: boolean;
-  is_blocked?: boolean;
 }
 
 export interface CreateGroupConversationResponse {
@@ -257,9 +245,6 @@ export const rejectFollowRequest = (requestId: string) =>
   apiPost<{ status: string }>(`/users/follow-requests/${requestId}/reject`);
 export const getFollowers = (username: string) => apiGet<AuthorResponse[]>(`/users/${username}/followers`);
 export const getFollowing = (username: string) => apiGet<AuthorResponse[]>(`/users/${username}/following`);
-export const getBlockedUsers = () => apiGet<BlockedUser[]>("/users/me/blocked");
-export const toggleBlock = (username: string) =>
-  apiPost<{ status: "blocked" | "unblocked" }>(`/users/${username}/block`);
 
 export const getConversations = () => apiGet<ConversationResponse[]>("/chat/conversations");
 // Soft delete: hides the conversation from the current user's list only.
@@ -333,3 +318,22 @@ export interface ExploreUsersResponse {
 
 export const getExploreUsers = (skip: number = 0, limit: number = 20) =>
   apiGet<ExploreUsersResponse>(`/users/explore?skip=${skip}&limit=${limit}`);
+
+
+// Blocked User -----------------------------------------------------------------------
+
+export interface BlockedUser {
+  id: string;
+  username: string;
+  full_name: string;
+  avatar_url: string | null;
+  blocked_at: string;
+}
+ 
+export type ToggleBlockStatus = "blocked" | "unblocked";
+ 
+export const toggleBlock = (username: string) =>
+  apiPost<{ status: ToggleBlockStatus }>(`/users/${username}/block`);
+ 
+export const getBlockedUsers = () => apiGet<BlockedUser[]>("/users/me/blocked");
+ 
