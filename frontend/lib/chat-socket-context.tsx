@@ -14,6 +14,12 @@
  *   message notifications) until the user reopened the chat page.
  * - A single root-level socket means presence, new messages, and reactions
  *   keep flowing everywhere in the app, not just while /chat is mounted.
+ *
+ * NOTE: This context is deliberately "dumb" about content — it just relays
+ * raw events off the wire. Desktop notifications live in chat/page.tsx
+ * instead, because that's the only place where messages get decrypted and
+ * where we know the real sender's display name. Triggering a notification
+ * here would either show ciphertext or a generic "Someone" label.
  */
 
 import React, {
@@ -53,7 +59,12 @@ interface ChatSocketContextValue {
   isConnected: boolean;
   onlineUsers: Set<string>;
   /** Send a new chat message into a conversation. */
-  sendMessage: (conversationId: string, content: string, imageUrl?: string | null, msgType?: number | null) => void;
+  sendMessage: (
+    conversationId: string,
+    content: string,
+    imageUrl?: string | null,
+    msgType?: number | null
+  ) => void;
   /** Toggle/replace a reaction on a message. */
   sendReaction: (messageId: string, emoji: string) => void;
   /** Subscribe to incoming chat_message events. Returns an unsubscribe fn. */
@@ -118,7 +129,12 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
         });
       } else if (data.type === "chat_message") {
         const { type, ...msg } = data;
-        chatMessageHandlers.current.forEach((h) => h(msg as ChatMessageResponse));
+        const chatMsg = msg as ChatMessageResponse;
+
+        // Just relay the raw event. Decryption + desktop notifications
+        // happen downstream in chat/page.tsx, where we actually have the
+        // keys and the sender's real name.
+        chatMessageHandlers.current.forEach((h) => h(chatMsg));
       } else if (data.type === "reaction_update") {
         reactionHandlers.current.forEach((h) => h(data));
       }

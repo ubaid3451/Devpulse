@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
+// @ts-ignore: allow global CSS side-effect import in app layout
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { ChatSocketProvider } from "@/lib/chat-socket-context";

@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useChatSocket } from "@/lib/chat-socket-context";
 import { useE2EE } from "@/lib/e2ee-context";
 import { cacheMessagePlaintext, getCachedMessagePlaintext } from "@/lib/message-plaintext-cache";
+import { showDesktopNotification, requestNotificationPermission, isTabHidden } from "@/lib/notifications";
 import AppLayout from "@/components/AppLayout";
 import CreateGroupModal from "@/components/CreateGroupModal";
 import EmojiPicker, { Theme } from "emoji-picker-react";
@@ -20,7 +21,6 @@ import {
   uploadChatImage,
   startDirectConversation,
   hideConversation,
-  toggleBlock,
 } from "@/lib/api";
 
 export default function ChatPage() {
@@ -50,33 +50,14 @@ export default function ChatPage() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [togglingBlock, setTogglingBlock] = useState(false);
 
-  const handleToggleBlockUser = async (username: string) => {
-    setTogglingBlock(true);
-    try {
-      const res = await toggleBlock(username);
-      const isNowBlocked = res.status === "blocked";
-      setConversations((prev) =>
-        prev.map((c) => {
-          const other = c.participants[0];
-          if (!c.is_group && other?.username === username) {
-            return {
-              ...c,
-              is_blocked_by_me: isNowBlocked,
-              is_blocked: isNowBlocked || !!c.has_blocked_me,
-            };
-          }
-          return c;
-        })
-      );
-      refreshConversations();
-    } catch (err) {
-      console.error("Failed to toggle block status", err);
-    } finally {
-      setTogglingBlock(false);
-    }
-  };
+  // Desktop notifications now live here (not in ChatSocketProvider) because
+  // this is the only place that has both (a) the decryption keys needed to
+  // turn ciphertext into a readable body, and (b) the real sender name from
+  // `conversations`. Ask for permission once, up front.
+  useEffect(() => {
+    requestNotificationPermission();
+  }, []);
 
   const confirmDelete = async (conversationId: string) => {
     setDeletingId(conversationId);
@@ -105,6 +86,70 @@ export default function ChatPage() {
 
   const [decryptedPreviews, setDecryptedPreviews] = useState<Record<string, string>>({});
 
+  // Dedupes concurrent decrypt attempts for the same message id. Signal
+  // Protocol message keys are single-use — if two effects (history load,
+  // sidebar preview, live onChatMessage) try to decrypt the same ciphertext
+  // at the same time, the second one fails with MessageCounterError because
+  // the first already consumed the key. This makes concurrent callers await
+  // the same in-flight decrypt instead of each independently calling
+  // decryptFrom, and it also handles writing the plaintext cache itself so
+  // call sites don't need a separate cacheMessagePlaintext step.
+  const inFlightDecrypts = useRef<Map<string, Promise<string>>>(new Map());
+
+  const decryptOnce = (
+    messageId: string,
+    otherUsername: string,
+    payload: { content: string; msg_type: number }
+  ): Promise<string> => {
+    if (currentUser) {
+      const cached = getCachedMessagePlaintext(currentUser.id, messageId);
+      if (cached !== undefined) return Promise.resolve(cached);
+    }
+
+    const existing = inFlightDecrypts.current.get(messageId);
+    if (existing) return existing;
+
+    const promise = decryptFrom(otherUsername, payload)
+      .then((plaintext) => {
+        if (currentUser) cacheMessagePlaintext(currentUser.id, messageId, plaintext);
+        return plaintext;
+      })
+      .finally(() => {
+        inFlightDecrypts.current.delete(messageId);
+      });
+
+    inFlightDecrypts.current.set(messageId, promise);
+    return promise;
+  };
+
+  // Builds the desktop notification for an incoming message, given its
+  // already-decrypted (or plaintext, for unencrypted/group messages) body.
+  // Looks the sender up directly in `conversations` rather than relying on
+  // `getSenderInfo` below, since that one is scoped to the active
+  // conversation only — this needs to work for background conversations too.
+  const notifyForMessage = (msg: ChatMessageResponse, content: string) => {
+    console.log("notifyForMessage called", msg.conversation_id, content);
+    const convo = conversations.find((c) => c.conversation_id === msg.conversation_id);
+
+    let senderName = "Someone";
+    if (convo?.is_group) {
+      const sender = convo.participants.find((p) => p.id === msg.sender_id);
+      senderName = sender?.full_name || sender?.username || "Someone";
+    } else {
+      const other = convo?.participants[0];
+      senderName = other?.full_name || other?.username || "Someone";
+    }
+
+    showDesktopNotification({
+      title: `New message from ${senderName}`,
+      body: content || (msg.image_url ? "Sent an attachment" : "New message"),
+      tag: `chat-conv-${msg.conversation_id}`,
+      onClick: () => {
+        window.location.href = `/chat?id=${msg.conversation_id}`;
+      },
+    });
+  };
+
   const refreshConversations = () => {
     getConversations()
       .then(async (convos) => {
@@ -122,21 +167,14 @@ export default function ChatPage() {
           convos.map(async (convo) => {
             if (convo.is_group || !convo.last_message_encrypted || !convo.last_message_id) return;
 
-            const cached = getCachedMessagePlaintext(currentUser.id, convo.last_message_id);
-            if (cached !== undefined) {
-              previews[convo.conversation_id] = cached;
-              return;
-            }
-
             const otherUsername = convo.participants[0]?.username;
             if (!otherUsername || !convo.last_message || convo.last_message_msg_type == null) return;
 
             try {
-              const plaintext = await decryptFrom(otherUsername, {
+              const plaintext = await decryptOnce(convo.last_message_id, otherUsername, {
                 content: convo.last_message,
                 msg_type: convo.last_message_msg_type,
               });
-              cacheMessagePlaintext(currentUser.id, convo.last_message_id, plaintext);
               previews[convo.conversation_id] = plaintext;
             } catch (err) {
               // Most likely cause: this message's one-time key was already
@@ -161,12 +199,18 @@ export default function ChatPage() {
   useEffect(() => {
     if (!initialUsername) return;
     setIsResolvingConversation(true);
-    startDirectConversation(initialUsername)
+ startDirectConversation(initialUsername)
       .then((res) => {
         setActiveConversationId(res.conversation_id);
         refreshConversations();
       })
-      .catch((err) => console.error("Failed to start conversation", err))
+      .catch((err) => {
+        console.error("Failed to start conversation", err);
+        if (err?.status === 403) {
+          alert("You can't message this user.");
+        }
+        router.replace("/chat"); // clear the ?user= param so it doesn't retry on refresh
+      })
       .finally(() => setIsResolvingConversation(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialUsername]);
@@ -211,8 +255,7 @@ export default function ChatPage() {
             }
 
             try {
-              const plaintext = await decryptFrom(otherUsername, { content: msg.content, msg_type: msg.msg_type! });
-              if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
+              const plaintext = await decryptOnce(msg.id, otherUsername, { content: msg.content, msg_type: msg.msg_type! });
               return { ...msg, content: plaintext };
             } catch (err) {
               console.error("Failed to decrypt message", msg.id, err);
@@ -251,10 +294,13 @@ export default function ChatPage() {
   // This page no longer owns a WebSocket connection — it just listens.
   useEffect(() => {
     const unsubMessage = onChatMessage(async (msg) => {
+      console.log("onChatMessage fired", msg, "isTabHidden:", isTabHidden());
+      const isOwnMessage = msg.sender_id === currentUser?.id;
+
       if (msg.conversation_id === activeConversationId) {
         let toAppend = msg;
 
-        if (msg.sender_id === currentUser?.id) {
+        if (isOwnMessage) {
           // This is the server's echo of a message WE just sent. We already
           // know the plaintext (we typed it) — grab it from the pending
           // queue and cache it under the now-known real message id.
@@ -271,8 +317,7 @@ export default function ChatPage() {
           const otherUsername = !convo?.is_group ? convo?.participants[0]?.username : undefined;
           if (otherUsername) {
             try {
-              const plaintext = await decryptFrom(otherUsername, { content: msg.content, msg_type: msg.msg_type! });
-              if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
+              const plaintext = await decryptOnce(msg.id, otherUsername, { content: msg.content, msg_type: msg.msg_type! });
               toAppend = { ...msg, content: plaintext };
             } catch (err) {
               console.error("Failed to decrypt incoming message", err);
@@ -282,6 +327,38 @@ export default function ChatPage() {
         }
 
         setMessages((prev) => [...prev, toAppend]);
+
+        // Only notify for messages from other people, and only when the
+        // person isn't already looking at this tab. toAppend.content is
+        // guaranteed to be real plaintext at this point, never ciphertext.
+        if (!isOwnMessage && isTabHidden()) {
+          notifyForMessage(msg, toAppend.content);
+        }
+      } else if (!isOwnMessage) {
+        // Message arrived for a conversation that ISN'T the one currently
+        // open. We still need real plaintext for the notification body, so
+        // decrypt it here using the same cache-first approach used
+        // everywhere else in this file.
+        let notifyContent = msg.content;
+
+        if (msg.msg_type && e2eeReady) {
+          const convo = conversations.find((c) => c.conversation_id === msg.conversation_id);
+          const otherUsername = !convo?.is_group ? convo?.participants[0]?.username : undefined;
+
+          if (otherUsername) {
+            try {
+              notifyContent = await decryptOnce(msg.id, otherUsername, { content: msg.content, msg_type: msg.msg_type! });
+            } catch (err) {
+              // Falls back to a generic body rather than showing ciphertext.
+              console.error("Failed to decrypt message for notification", msg.id, err);
+              notifyContent = "";
+            }
+          }
+        }
+
+        if (isTabHidden()) {
+          notifyForMessage(msg, notifyContent);
+        }
       }
       refreshConversations();
     });
@@ -299,16 +376,20 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConversationId, onChatMessage, onReactionUpdate, conversations, e2eeReady, decryptFrom]);
 
-  const selectSearchResultUser = async (user: AuthorResponse) => {
+const selectSearchResultUser = async (user: AuthorResponse) => {
     setSearchQuery("");
     try {
       const res = await startDirectConversation(user.username);
       setActiveConversationId(res.conversation_id);
       refreshConversations();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to start conversation", err);
+      if (err?.status === 403) {
+        alert("You can't message this user.");
+      }
     }
   };
+  
 
   const sendChatMessage = async () => {
     if ((!inputText.trim() && !attachedImage) || !activeConversationId || isUploading) return;
@@ -547,24 +628,9 @@ export default function ChatPage() {
 
                         {isMenuOpen && (
                           <div
-                            className="absolute right-0 top-9 z-20 w-40 overflow-hidden rounded-lg border border-outline-variant/40 bg-[#1e2025] shadow-xl"
+                            className="absolute right-0 top-9 z-20 w-36 overflow-hidden rounded-lg border border-outline-variant/40 bg-[#1e2025] shadow-xl"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {!conv.is_group && other && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  handleToggleBlockUser(other.username);
-                                }}
-                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-on-surface hover:bg-white/10 transition-colors border-b border-outline-variant/20"
-                              >
-                                <span className="material-symbols-outlined text-[16px] text-red-400">
-                                  {conv.is_blocked_by_me ? "lock_open" : "block"}
-                                </span>
-                                {conv.is_blocked_by_me ? "Unblock user" : "Block user"}
-                              </button>
-                            )}
                             <button
                               type="button"
                               onClick={() => {
@@ -654,24 +720,7 @@ export default function ChatPage() {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3 text-on-surface-variant">
-                  {!activeConversation?.is_group && activeOtherParticipant && (
-                    <button
-                      onClick={() => handleToggleBlockUser(activeOtherParticipant.username)}
-                      disabled={togglingBlock}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
-                        activeConversation?.is_blocked_by_me
-                          ? "bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/40"
-                          : "bg-surface-variant/80 hover:bg-surface-variant text-on-surface-variant hover:text-on-surface border border-outline-variant/30"
-                      }`}
-                      title={activeConversation?.is_blocked_by_me ? "Unblock user" : "Block user"}
-                    >
-                      <span className="material-symbols-outlined text-[16px]">
-                        {activeConversation?.is_blocked_by_me ? "lock_open" : "block"}
-                      </span>
-                      {activeConversation?.is_blocked_by_me ? "Unblock" : "Block"}
-                    </button>
-                  )}
+                <div className="flex items-center gap-4 text-on-surface-variant">
                   <button onClick={() => alert("Audio calls coming soon!")} className="hover:text-primary transition-colors"><span className="material-symbols-outlined text-[22px]">call</span></button>
                   <button onClick={() => alert("Video calls coming soon!")} className="hover:text-primary transition-colors"><span className="material-symbols-outlined text-[22px]">videocam</span></button>
                   <button onClick={() => alert("Info panel coming soon!")} className="hover:text-primary transition-colors"><span className="material-symbols-outlined text-[22px]">info</span></button>
@@ -786,110 +835,85 @@ export default function ChatPage() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Chat Input or Blocked Notice */}
-              {activeConversation?.is_blocked ? (
-                <div className="p-4 bg-[#0b0d10] border-t border-outline-variant/20 flex items-center justify-center">
-                  <div className="text-sm font-medium text-on-surface-variant/80 flex flex-wrap items-center justify-between gap-4 bg-[#1e2025] px-5 py-3.5 rounded-xl border border-outline-variant/30 w-full max-w-xl shadow-lg">
-                    <div className="flex items-center gap-2.5 text-on-surface">
-                      <span className="material-symbols-outlined text-[20px] text-red-400 shrink-0">block</span>
-                      <span>
-                        {activeConversation.is_blocked_by_me
-                          ? `You have blocked @${activeOtherParticipant?.username || "this user"}.`
-                          : "You can't message a blocked user."}
-                      </span>
-                    </div>
-                    {activeConversation.is_blocked_by_me && activeOtherParticipant && (
-                      <button
-                        onClick={() => handleToggleBlockUser(activeOtherParticipant.username)}
-                        disabled={togglingBlock}
-                        className="px-3.5 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 rounded-lg text-xs font-bold transition-colors shrink-0 flex items-center gap-1"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">lock_open</span>
-                        Unblock User
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="p-4 bg-[#0b0d10] border-t border-outline-variant/20">
-                  <div className="bg-[#111318] border border-outline-variant/40 rounded-xl overflow-hidden focus-within:border-primary/50 transition-colors">
-                    <div className="px-3 py-2 border-b border-outline-variant/20 flex gap-2 text-on-surface-variant relative">
-                      <button onClick={() => insertTextAtCursor("**", "**")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm">B</button>
-                      <button onClick={() => insertTextAtCursor("*", "*")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm italic">I</button>
-                      <button onClick={() => insertTextAtCursor("`", "`")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors text-sm">&lt; &gt;</button>
-                      <button onClick={() => insertTextAtCursor("[", "](url)")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"><span className="material-symbols-outlined text-[16px]">link</span></button>
-                      <button
-                        onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                        className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">sentiment_satisfied</span>
-                      </button>
+              {/* Chat Input */}
+              <div className="p-4 bg-[#0b0d10] border-t border-outline-variant/20">
+                <div className="bg-[#111318] border border-outline-variant/40 rounded-xl overflow-hidden focus-within:border-primary/50 transition-colors">
+                  <div className="px-3 py-2 border-b border-outline-variant/20 flex gap-2 text-on-surface-variant relative">
+                    <button onClick={() => insertTextAtCursor("**", "**")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm">B</button>
+                    <button onClick={() => insertTextAtCursor("*", "*")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm italic">I</button>
+                    <button onClick={() => insertTextAtCursor("`", "`")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors text-sm">&lt; &gt;</button>
+                    <button onClick={() => insertTextAtCursor("[", "](url)")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"><span className="material-symbols-outlined text-[16px]">link</span></button>
+                    <button
+                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                      className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">sentiment_satisfied</span>
+                    </button>
 
-                      {showEmojiPicker && (
-                        <div className="absolute bottom-full left-0 mb-2 z-30">
-                          <EmojiPicker
-                            onEmojiClick={(e) => setInputText((prev) => prev + e.emoji)}
-                            theme={Theme.DARK}
-                          />
-                        </div>
-                      )}
-                    </div>
-
-                    {attachedImage && (
-                      <div className="px-4 py-2 bg-surface-variant/20 border-b border-outline-variant/20 flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-sm text-primary truncate">
-                          <span className="material-symbols-outlined text-[18px]">image</span>
-                          {attachedImage.name}
-                        </div>
-                        <button onClick={() => setAttachedImage(null)} className="text-on-surface-variant hover:text-red-400">
-                          <span className="material-symbols-outlined text-[18px]">close</span>
-                        </button>
+                    {showEmojiPicker && (
+                      <div className="absolute bottom-full left-0 mb-2 z-30">
+                        <EmojiPicker
+                          onEmojiClick={(e) => setInputText((prev) => prev + e.emoji)}
+                          theme={Theme.DARK}
+                        />
                       </div>
                     )}
+                  </div>
 
-                    <div className="flex items-end p-2 gap-2">
-                      <input
-                        type="file"
-                        ref={fileInputRef}
-                        className="hidden"
-                        accept="image/*"
-                        onChange={(e) => {
-                          if (e.target.files && e.target.files[0]) {
-                            setAttachedImage(e.target.files[0]);
-                          }
-                        }}
-                      />
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="p-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/50 rounded-lg transition-colors"
-                      >
-                        <span className="material-symbols-outlined">attach_file</span>
-                      </button>
-                      <textarea
-                        ref={textareaRef}
-                        value={inputText}
-                        onChange={(e) => setInputText(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            sendChatMessage();
-                          }
-                        }}
-                        placeholder="Write a message or paste code..."
-                        className="flex-1 bg-transparent border-none resize-none max-h-32 min-h-[44px] py-3 focus:outline-none focus:ring-0 text-[15px]"
-                        rows={1}
-                      />
-                      <button
-                        onClick={sendChatMessage}
-                        disabled={(!inputText.trim() && !attachedImage) || isUploading}
-                        className="p-3 bg-[#71d4ff] text-[#003548] rounded-lg disabled:opacity-50 hover:brightness-110 transition-colors shrink-0 mb-1"
-                      >
-                        <span className="material-symbols-outlined text-[20px]">{isUploading ? "hourglass_empty" : "send"}</span>
+                  {attachedImage && (
+                    <div className="px-4 py-2 bg-surface-variant/20 border-b border-outline-variant/20 flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm text-primary truncate">
+                        <span className="material-symbols-outlined text-[18px]">image</span>
+                        {attachedImage.name}
+                      </div>
+                      <button onClick={() => setAttachedImage(null)} className="text-on-surface-variant hover:text-red-400">
+                        <span className="material-symbols-outlined text-[18px]">close</span>
                       </button>
                     </div>
+                  )}
+
+                  <div className="flex items-end p-2 gap-2">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          setAttachedImage(e.target.files[0]);
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="p-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/50 rounded-lg transition-colors"
+                    >
+                      <span className="material-symbols-outlined">attach_file</span>
+                    </button>
+                    <textarea
+                      ref={textareaRef}
+                      value={inputText}
+                      onChange={(e) => setInputText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          sendChatMessage();
+                        }
+                      }}
+                      placeholder="Write a message or paste code..."
+                      className="flex-1 bg-transparent border-none resize-none max-h-32 min-h-[44px] py-3 focus:outline-none focus:ring-0 text-[15px]"
+                      rows={1}
+                    />
+                    <button
+                      onClick={sendChatMessage}
+                      disabled={(!inputText.trim() && !attachedImage) || isUploading}
+                      className="p-3 bg-[#71d4ff] text-[#003548] rounded-lg disabled:opacity-50 hover:brightness-110 transition-colors shrink-0 mb-1"
+                    >
+                      <span className="material-symbols-outlined text-[20px]">{isUploading ? "hourglass_empty" : "send"}</span>
+                    </button>
                   </div>
                 </div>
-              )}
+              </div>
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-on-surface-variant/50">
@@ -912,4 +936,4 @@ export default function ChatPage() {
       )}
     </AppLayout>
   );
-}             
+}
