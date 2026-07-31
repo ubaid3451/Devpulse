@@ -133,6 +133,9 @@ def get_chat_history(db: Session, current_user: User, conversation_id: str) -> O
         .order_by(Message.created_at)
     ).scalars().all()
 
+    print("Fetched messages:", messages)
+
+
     return [{
         "id": msg.id,
         "conversation_id": msg.conversation_id,
