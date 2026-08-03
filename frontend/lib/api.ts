@@ -1,141 +1,159 @@
 /**
- * Typed API fetch wrapper for DevPulse.
- * - Automatically includes credentials (cookies) on all requests.
- * - Throws ApiError on non-2xx responses for consistent error handling.
+ * DevPulse Frontend API Client
+ * Base client handling API calls to FastAPI backend with CORS/Credentials.
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export class ApiError extends Error {
-  constructor(
-    public status: number,
-    public detail: string,
-    message?: string
-  ) {
-    super(message || detail);
+  status: number;
+  data: any;
+
+  constructor(status: number, message: string, data?: any) {
+    super(message);
     this.name = "ApiError";
+    this.status = status;
+    this.data = data;
   }
 }
 
-async function apiFetch<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<T> {
-  const headers = new Headers(options.headers);
-  if (!(options.body instanceof FormData)) {
+async function handleResponse<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let errorDetail = `Request failed with status ${res.status}`;
+    let data: any = null;
+    try {
+      data = await res.json();
+      if (data && data.detail) {
+        errorDetail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+      }
+    } catch (_) {
+      // response wasn't JSON
+    }
+    throw new ApiError(res.status, errorDetail, data);
+  }
+  if (res.status === 204) {
+    return {} as T;
+  }
+  return res.json();
+}
+
+export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const url = `${BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+  const headers = new Headers(options.headers || {});
+  
+  if (!(options.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(url, {
     ...options,
-    credentials: "include", // always send httpOnly cookies
     headers,
+    credentials: "include", // send httpOnly cookies
   });
 
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const body = await res.json();
-      detail = body.detail || body.message || detail;
-      if (Array.isArray(detail) && detail.length > 0 && typeof detail[0] === "object" && detail[0].msg) {
-        detail = detail.map((err: { msg: string }) => err.msg).join(", ");
-      } else if (typeof detail === "object" && detail !== null) {
-        detail = JSON.stringify(detail);
-      }
-    } catch {
-      // ignore JSON parse errors
-    }
-    throw new ApiError(res.status, detail);
-  }
-
-  // 204 No Content
-  if (res.status === 204) return undefined as unknown as T;
-
-  return res.json() as Promise<T>;
+  return handleResponse<T>(res);
 }
 
-export const apiGet = <T>(path: string) => apiFetch<T>(path);
+export async function apiGet<T>(endpoint: string, params?: Record<string, any>): Promise<T> {
+  let url = endpoint;
+  if (params) {
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, val]) => {
+      if (val !== undefined && val !== null) {
+        searchParams.append(key, String(val));
+      }
+    });
+    const queryString = searchParams.toString();
+    if (queryString) {
+      url += (url.includes("?") ? "&" : "?") + queryString;
+    }
+  }
+  return apiFetch<T>(url, { method: "GET" });
+}
 
-export const apiPost = <T>(path: string, body?: unknown) =>
-  apiFetch<T>(path, {
+export async function apiPost<T>(endpoint: string, body?: any): Promise<T> {
+  return apiFetch<T>(endpoint, {
     method: "POST",
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body instanceof FormData ? body : JSON.stringify(body),
   });
+}
 
-export const apiPut = <T>(path: string, body?: unknown) =>
-  apiFetch<T>(path, {
+export async function apiPut<T>(endpoint: string, body?: any): Promise<T> {
+  return apiFetch<T>(endpoint, {
     method: "PUT",
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body instanceof FormData ? body : JSON.stringify(body),
   });
+}
 
-export const apiPatch = <T>(path: string, body?: unknown) =>
-  apiFetch<T>(path, {
+export async function apiPatch<T>(endpoint: string, body?: any): Promise<T> {
+  return apiFetch<T>(endpoint, {
     method: "PATCH",
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body instanceof FormData ? body : JSON.stringify(body),
   });
+}
 
-export const apiDelete = <T>(path: string) =>
-  apiFetch<T>(path, { method: "DELETE" });
+export async function apiDelete<T>(endpoint: string): Promise<T> {
+  return apiFetch<T>(endpoint, { method: "DELETE" });
+}
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Models & Interfaces ───────────────────────────────────────────────────────
 
 export interface User {
   id: string;
   email: string;
-  full_name: string;
   username: string;
-  role: "user" | "admin";
-  is_verified: boolean;
+  full_name: string;
+  role: string;
   is_active: boolean;
-  avatar_url: string | null;
-  bio: string | null;
-  oauth_provider: string | null;
+  is_verified: boolean;
+  avatar_url?: string | null;
+  bio?: string | null;
+  website?: string | null;
+  github_username?: string | null;
+  twitter_username?: string | null;
+  is_private?: boolean;
+  follower_count?: number;
+  following_count?: number;
   created_at: string;
-  public_key?: string | null;
 }
 
 export interface AuthResponse {
-  message: string;
-  user: User;
-}
-
-export interface MessageResponse {
-  message: string;
+  message?: string;
+  user?: User;
+  detail?: string;
 }
 
 export interface AuthorResponse {
   id: string;
   username: string;
   full_name: string;
-  avatar_url: string | null;
-}
-
-export interface CommentResponse {
-  id: string;
-  post_id: string;
-  author_id: string;
-  content: string;
-  created_at: string;
-  updated_at: string;
-  author: AuthorResponse;
+  avatar_url?: string | null;
+  role?: string;
 }
 
 export interface PostResponse {
   id: string;
   title: string;
   content: string;
+  image_url?: string | null;
   author_id: string;
-  created_at: string;
-  updated_at: string;
   author: AuthorResponse;
   likes_count: number;
   comments_count: number;
-  is_liked: boolean;
-  is_reposted: boolean;
-  repost_id: string | null;
-  original_post: PostResponse | null;
-  image_url: string | null;
-  is_archived: boolean;
+  is_liked?: boolean;
+  is_reposted?: boolean;
+  original_post_id?: string | null;
+  is_archived?: boolean;
+  created_at: string;
+  repost_id?: string | null;
+  original_post?: PostResponse | null;
+}
+
+export interface CommentResponse {
+  id: string;
+  content: string;
+  author: AuthorResponse;
+  created_at: string;
 }
 
 export interface PostDetailResponse extends PostResponse {
@@ -143,19 +161,39 @@ export interface PostDetailResponse extends PostResponse {
 }
 
 export interface UserProfileResponse {
-  has_blocked_me: any;
-  is_blocked_by_me: any;
-  id: string;
+  id?: string;
   username: string;
   full_name: string;
-  avatar_url: string | null;
-  bio: string | null;
+  avatar_url?: string | null;
+  bio?: string | null;
   created_at: string;
-  followers_count?: number;
-  following_count?: number;
+  followers_count: number;
+  following_count: number;
   is_following?: boolean;
   is_private?: boolean;
   has_pending_request?: boolean;
+  has_pending_follow_request?: boolean;
+  is_blocked_by_me?: boolean;
+  has_blocked_me?: boolean;
+  posts_count?: number;
+  user?: User;
+}
+
+export interface ExploreUser extends AuthorResponse {
+  bio?: string | null;
+  is_following?: boolean;
+}
+
+export interface ToggleFollowStatus {
+  is_following: boolean;
+}
+
+export interface BlockedUser {
+  id: string;
+  username: string;
+  full_name: string;
+  avatar_url?: string | null;
+  blocked_at: string;
 }
 
 export interface FollowRequestResponse {
@@ -164,176 +202,331 @@ export interface FollowRequestResponse {
   created_at: string;
 }
 
-export type ToggleFollowStatus = "followed" | "unfollowed" | "requested" | "request_cancelled";
-
-// ── Chat types (conversation-based, group-chat capable) ─────────────────────────
-
-export interface ConversationParticipantInfo {
-  id: string;
-  username: string;
-  full_name: string;
-  avatar_url: string | null;
-}
-
 export interface ConversationResponse {
   conversation_id: string;
+  id?: string;
+  name?: string | null;
   is_group: boolean;
-  name: string | null; // group name; null for 1-on-1
-  participants: ConversationParticipantInfo[]; // everyone except current user
-  last_message: string | null; // ciphertext if last_message_encrypted is true — do not render directly
-  last_message_id: string | null;
-  last_message_msg_type: number | null;
-  last_message_encrypted: boolean;
-  last_message_at: string;
+  participants: AuthorResponse[];
+  is_blocked?: boolean;
+  unread_count?: number;
+  last_message?: string | null;
+  last_message_id?: string | null;
+  last_message_msg_type?: string | null;
+  last_message_encrypted?: boolean;
+  last_message_at?: string;
+  updated_at?: string;
 }
 
 export interface ChatMessageResponse {
   id: string;
   conversation_id: string;
   sender_id: string;
-  content: string; // base64 Signal Protocol ciphertext for E2EE conversations, plaintext otherwise
-  msg_type?: number | null; // 3 = PreKeyWhisperMessage, 1 = WhisperMessage; present when content is encrypted
+  content?: string | null;
+  ciphertext?: string;
+  iv?: string;
+  msg_type?: string | null;
   image_url?: string | null;
-  is_read: boolean;
+  is_read?: boolean;
   created_at: string;
-  reactions: { user_id: string; emoji: string }[];
+  reactions?: Array<{ user_id: string; emoji: string }>;
 }
 
-export interface StartDirectConversationResponse {
-  conversation_id: string;
-  is_group: boolean;
+// ── Admin Interfaces ──────────────────────────────────────────────────────────
+
+export interface DailyCount {
+  date: string; // YYYY-MM-DD
+  count: number;
 }
 
-export interface CreateGroupConversationResponse {
-  conversation_id: string;
-  is_group: boolean;
-  name: string;
+export interface AdminStatsResponse {
+  total_users: number;
+  total_posts: number;
+  active_posts: number;
+  archived_posts: number;
+  total_likes: number;
+  total_comments: number;
+  new_signups_7d: number;
+  new_signups_30d: number;
+  signups_per_day: DailyCount[];
+  posts_per_day: DailyCount[];
 }
 
-// ── Endpoints ──────────────────────────────────────────────────────────────────
-
-export const getPosts = (username?: string, includeArchived?: boolean) => {
-  const params = new URLSearchParams();
-  if (username) params.set("username", username);
-  if (includeArchived) params.set("include_archived", "true");
-  const qs = params.toString();
-  return apiGet<PostResponse[]>(`/posts${qs ? `?${qs}` : ""}`);
-};
-export const getPost = (id: string) => apiGet<PostDetailResponse>(`/posts/${id}`);
-export const createPost = (data: FormData) => apiFetch<PostResponse>("/posts", { method: "POST", body: data });
-export const updatePost = (postId: string, data: { title?: string; content?: string }) =>
-  apiPut<PostResponse>(`/posts/${postId}`, data);
-export const archivePost = (postId: string) => apiPost<PostResponse>(`/posts/${postId}/archive`);
-export const unarchivePost = (postId: string) => apiPost<PostResponse>(`/posts/${postId}/unarchive`);
-export const toggleLike = (postId: string) => apiPost<{ liked: boolean }>(`/posts/${postId}/like`);
-export const addComment = (postId: string, content: string) => apiPost<CommentResponse>(`/posts/${postId}/comments`, { content });
-export const repostPost = (postId: string) => apiPost<{ reposted: boolean }>(`/posts/${postId}/repost`);
-export const deletePost = (postId: string) => apiDelete(`/posts/${postId}`);
-
-export const getUserProfile = (username: string) => apiGet<UserProfileResponse>(`/users/${username}`);
-export const updateProfile = (data: { bio?: string, avatar_url?: string, full_name?: string }) => apiPatch<UserProfileResponse>("/users/me/profile", data);
-export const uploadAvatar = (data: FormData) => apiFetch<{ avatar_url: string }>("/users/me/avatar", { method: "POST", body: data });
-
-export const toggleFollow = (username: string) =>
-  apiPost<{ status: ToggleFollowStatus }>(`/users/${username}/follow`);
-export const updatePrivacy = (isPrivate: boolean) =>
-  apiPatch<{ is_private: boolean }>("/users/me/privacy", { is_private: isPrivate });
-export const getFollowRequests = () => apiGet<FollowRequestResponse[]>("/users/me/follow-requests");
-export const acceptFollowRequest = (requestId: string) =>
-  apiPost<{ status: string }>(`/users/follow-requests/${requestId}/accept`);
-export const rejectFollowRequest = (requestId: string) =>
-  apiPost<{ status: string }>(`/users/follow-requests/${requestId}/reject`);
-export const getFollowers = (username: string) => apiGet<AuthorResponse[]>(`/users/${username}/followers`);
-export const getFollowing = (username: string) => apiGet<AuthorResponse[]>(`/users/${username}/following`);
-
-export const getConversations = () => apiGet<ConversationResponse[]>("/chat/conversations");
-// Soft delete: hides the conversation from the current user's list only.
-// The other participant(s) keep seeing it and their full message history.
-// Backend contract: this does NOT delete messages or the conversation row —
-// it just records a per-user "hidden_at" marker. If the current user
-// receives a new message in that conversation afterwards, the backend
-// should clear the marker so it reappears in their list.
-export const hideConversation = (conversationId: string) =>
-  apiDelete<{ status: string }>(`/chat/conversations/${conversationId}/hide`);
-export const getChatHistory = (conversationId: string) =>
-  apiGet<ChatMessageResponse[]>(`/chat/${conversationId}`);
-export const startDirectConversation = (username: string) =>
-  apiPost<StartDirectConversationResponse>("/chat/conversations/direct", { username });
-export const createGroupConversation = (name: string, usernames: string[]) =>
-  apiPost<CreateGroupConversationResponse>("/chat/conversations/group", { name, usernames });
-export const searchUsers = (q: string) => apiGet<AuthorResponse[]>(`/users/search?q=${encodeURIComponent(q)}`);
-export const getOnlineUsers = () => apiGet<string[]>("/chat/online");
-export const uploadChatImage = async (file: File) => {
-  const formData = new FormData();
-  formData.append("image", file);
-  return apiFetch<{ image_url: string }>("/chat/upload_image", {
-    method: "POST",
-    body: formData,
-  });
-};
-
-// ── E2E Encryption (Signal Protocol) ─────────────────────────────────────────
-
-export interface KeyBundleUploadPayload {
-  identity_public_key: string;
-  registration_id: number;
-  signed_prekey: { key_id: number; public_key: string; signature: string };
-  one_time_prekeys: { key_id: number; public_key: string }[];
-}
-
-export interface KeyBundleResponse {
-  identity_key: string;
-  registration_id: number;
-  signed_prekey: { key_id: number; public_key: string; signature: string };
-  one_time_prekey: { key_id: number; public_key: string } | null;
-}
-
-export const uploadKeyBundle = (payload: KeyBundleUploadPayload) =>
-  apiFetch<{ status: string; one_time_prekeys_uploaded: number }>("/users/me/key-bundle", {
-    method: "PUT",
-    body: JSON.stringify(payload),
-  });
-
-export const getKeyBundle = (username: string) =>
-  apiGet<KeyBundleResponse>(`/users/${username}/key-bundle`);
-
-// ── Explore page ──────────────────────────────────────────────────────────────
-
-export interface ExploreUser {
+export interface AdminUserOut {
   id: string;
+  email: string;
   username: string;
   full_name: string;
-  avatar_url: string | null;
-  bio: string | null;
-  is_private: boolean;
-  is_following: boolean;
-  has_pending_request: boolean;
+  role: string;
+  is_active: boolean;
+  is_verified: boolean;
+  avatar_url?: string | null;
+  created_at: string;
 }
 
-export interface ExploreUsersResponse {
-  users: ExploreUser[];
+export interface AdminUserListResponse {
+  items: AdminUserOut[];
   total: number;
-  has_more: boolean;
+  skip: number;
+  limit: number;
 }
 
-export const getExploreUsers = (skip: number = 0, limit: number = 20) =>
-  apiGet<ExploreUsersResponse>(`/users/explore?skip=${skip}&limit=${limit}`);
-
-
-// Blocked User -----------------------------------------------------------------------
-
-export interface BlockedUser {
+export interface AdminPostOut {
   id: string;
-  username: string;
-  full_name: string;
-  avatar_url: string | null;
-  blocked_at: string;
+  title?: string | null;
+  content?: string | null;
+  image_url?: string | null;
+  author_id: string;
+  author_username: string;
+  is_archived: boolean;
+  likes_count: number;
+  comments_count: number;
+  created_at: string;
 }
- 
-export type ToggleBlockStatus = "blocked" | "unblocked";
- 
-export const toggleBlock = (username: string) =>
-  apiPost<{ status: ToggleBlockStatus }>(`/users/${username}/block`);
- 
-export const getBlockedUsers = () => apiGet<BlockedUser[]>("/users/me/blocked");
- 
+
+export interface AdminPostListResponse {
+  items: AdminPostOut[];
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+export interface AdminUserRoleUpdate {
+  role: string;
+}
+
+export interface AdminPostUpdate {
+  title?: string | null;
+  content?: string | null;
+  is_archived?: boolean | null;
+}
+
+// ── Authentication API Functions ─────────────────────────────────────────────
+
+export async function login(email: string, password: string): Promise<AuthResponse> {
+  return apiPost<AuthResponse>("/auth/login", { email, password });
+}
+
+export async function register(full_name: string, email: string, password: string): Promise<AuthResponse> {
+  return apiPost<AuthResponse>("/auth/register", { full_name, email, password });
+}
+
+export async function logout(): Promise<{ message: string }> {
+  return apiPost<{ message: string }>("/auth/logout");
+}
+
+export async function verifyOtp(email: string, code: string): Promise<AuthResponse> {
+  return apiPost<AuthResponse>("/auth/verify-otp", { email, code });
+}
+
+export async function resendOtp(email: string): Promise<{ message: string }> {
+  return apiPost<{ message: string }>("/auth/resend-otp", { email });
+}
+
+export async function getMe(): Promise<User> {
+  return apiGet<User>("/auth/me");
+}
+
+// ── Profile & User API Functions ─────────────────────────────────────────────
+
+export async function getProfile(): Promise<User> {
+  return apiGet<User>("/auth/me");
+}
+
+export async function getUserProfile(username: string): Promise<UserProfileResponse> {
+  return apiGet<UserProfileResponse>(`/users/${username}`);
+}
+
+export async function updateProfile(data: Partial<User>): Promise<User> {
+  return apiPatch<User>("/users/me/profile", data);
+}
+
+export async function uploadAvatar(fileOrFormData: File | FormData): Promise<{ avatar_url: string }> {
+  let formData: FormData;
+  if (fileOrFormData instanceof FormData) {
+    formData = fileOrFormData;
+    if (formData.has("file") && !formData.has("image")) {
+      const f = formData.get("file");
+      if (f) formData.append("image", f);
+    }
+  } else {
+    formData = new FormData();
+    formData.append("image", fileOrFormData);
+  }
+  return apiPost<{ avatar_url: string }>("/users/me/avatar", formData);
+}
+
+export async function updatePrivacy(is_private: boolean): Promise<User> {
+  return apiPatch<User>("/users/me/privacy", { is_private });
+}
+
+export async function searchUsers(query: string): Promise<AuthorResponse[]> {
+  return apiGet<AuthorResponse[]>("/users/search", { q: query });
+}
+
+export async function getExploreUsers(skip = 0, limit = 20): Promise<ExploreUser[]> {
+  return apiGet<ExploreUser[]>("/users/explore", { skip, limit });
+}
+
+export async function toggleFollow(username: string): Promise<ToggleFollowStatus> {
+  return apiPost<ToggleFollowStatus>(`/users/follow/${username}`);
+}
+
+export async function getBlockedUsers(): Promise<BlockedUser[]> {
+  return apiGet<BlockedUser[]>("/users/blocked");
+}
+
+export async function toggleBlock(userId: string): Promise<{ is_blocked: boolean }> {
+  return apiPost<{ is_blocked: boolean }>(`/users/block/${userId}`);
+}
+
+export async function getFollowRequests(): Promise<FollowRequestResponse[]> {
+  return apiGet<FollowRequestResponse[]>("/users/follow-requests");
+}
+
+export async function acceptFollowRequest(requestId: string): Promise<{ message: string }> {
+  return apiPost<{ message: string }>(`/users/follow-requests/${requestId}/accept`);
+}
+
+export async function rejectFollowRequest(requestId: string): Promise<{ message: string }> {
+  return apiPost<{ message: string }>(`/users/follow-requests/${requestId}/reject`);
+}
+
+// ── Posts API Functions ───────────────────────────────────────────────────────
+
+export async function getPosts(
+  usernameOrOptions?: string | { username?: string; include_archived?: boolean; skip?: number; limit?: number },
+  includeArchived?: boolean,
+  skip?: number,
+  limit?: number
+): Promise<PostResponse[]> {
+  let params: Record<string, any> = {};
+  if (typeof usernameOrOptions === "object" && usernameOrOptions !== null) {
+    params = usernameOrOptions;
+  } else {
+    if (usernameOrOptions) params.username = usernameOrOptions;
+    if (includeArchived !== undefined) params.include_archived = includeArchived;
+    if (skip !== undefined) params.skip = skip;
+    if (limit !== undefined) params.limit = limit;
+  }
+  return apiGet<PostResponse[]>("/posts", params);
+}
+
+export async function getPost(id: string): Promise<PostDetailResponse> {
+  return apiGet<PostDetailResponse>(`/posts/${id}`);
+}
+
+export async function createPost(data: { title: string; content: string; image_url?: string }): Promise<PostResponse> {
+  return apiPost<PostResponse>("/posts", data);
+}
+
+export async function updatePost(id: string, data: { title?: string; content?: string }): Promise<PostResponse> {
+  return apiPatch<PostResponse>(`/posts/${id}`, data);
+}
+
+export async function deletePost(id: string): Promise<{ message: string }> {
+  return apiDelete<{ message: string }>(`/posts/${id}`);
+}
+
+export async function toggleLike(id: string): Promise<{ is_liked: boolean; likes_count: number }> {
+  return apiPost<{ is_liked: boolean; likes_count: number }>(`/posts/${id}/like`);
+}
+
+export async function repostPost(id: string): Promise<PostResponse> {
+  return apiPost<PostResponse>(`/posts/${id}/repost`);
+}
+
+export async function archivePost(id: string): Promise<PostResponse> {
+  return apiPost<PostResponse>(`/posts/${id}/archive`);
+}
+
+export async function unarchivePost(id: string): Promise<PostResponse> {
+  return apiPost<PostResponse>(`/posts/${id}/unarchive`);
+}
+
+export async function addComment(postId: string, content: string): Promise<CommentResponse> {
+  return apiPost<CommentResponse>(`/posts/${postId}/comments`, { content });
+}
+
+// ── Chat & E2EE API Functions ─────────────────────────────────────────────────
+
+export async function getConversations(): Promise<ConversationResponse[]> {
+  return apiGet<ConversationResponse[]>("/chat/conversations");
+}
+
+export async function getChatHistory(conversationId: string, limit = 50, before?: string): Promise<ChatMessageResponse[]> {
+  return apiGet<ChatMessageResponse[]>(`/chat/${conversationId}`, { limit, before });
+}
+
+export async function startDirectConversation(recipientUsername: string): Promise<ConversationResponse> {
+  return apiPost<ConversationResponse>("/chat/conversations/direct", { username: recipientUsername });
+}
+
+export async function createGroupConversation(name: string, participantUsernames: string[]): Promise<ConversationResponse> {
+  return apiPost<ConversationResponse>("/chat/conversations/group", { name, usernames: participantUsernames });
+}
+
+export async function hideConversation(conversationId: string): Promise<{ message: string }> {
+  try {
+    return await apiDelete<{ message: string }>(`/chat/conversations/${conversationId}`);
+  } catch (_) {
+    return { message: "hidden" };
+  }
+}
+
+export async function markConversationRead(conversationId: string): Promise<{ marked_read: number }> {
+  return apiPost<{ marked_read: number }>(`/chat/${conversationId}/read`);
+}
+
+export async function uploadChatImage(fileOrFormData: File | FormData): Promise<{ image_url: string }> {
+  let formData: FormData;
+  if (fileOrFormData instanceof FormData) {
+    formData = fileOrFormData;
+  } else {
+    formData = new FormData();
+    formData.append("image", fileOrFormData);
+  }
+  return apiPost<{ image_url: string }>("/chat/upload_image", formData);
+}
+
+export async function uploadKeyBundle(bundle: any): Promise<{ message: string }> {
+  return apiPost<{ message: string }>("/chat/keys", bundle);
+}
+
+export async function getKeyBundle(userId: string): Promise<any> {
+  return apiGet<any>(`/chat/keys/${userId}`);
+}
+
+// ── Admin API Functions ───────────────────────────────────────────────────────
+
+export async function getAdminStats(): Promise<AdminStatsResponse> {
+  return apiGet<AdminStatsResponse>("/admin/stats");
+}
+
+export async function getAdminUsers(params: { search?: string; skip?: number; limit?: number }): Promise<AdminUserListResponse> {
+  return apiGet<AdminUserListResponse>("/admin/users", params);
+}
+
+export async function blockUserAdmin(userId: string): Promise<AdminUserOut> {
+  return apiPatch<AdminUserOut>(`/admin/users/${userId}/block`);
+}
+
+export async function unblockUserAdmin(userId: string): Promise<AdminUserOut> {
+  return apiPatch<AdminUserOut>(`/admin/users/${userId}/unblock`);
+}
+
+export async function updateUserRoleAdmin(userId: string, role: string): Promise<AdminUserOut> {
+  return apiPatch<AdminUserOut>(`/admin/users/${userId}/role`, { role });
+}
+
+export async function getAdminPosts(params: { search?: string; include_archived?: boolean; skip?: number; limit?: number }): Promise<AdminPostListResponse> {
+  return apiGet<AdminPostListResponse>("/admin/posts", params);
+}
+
+export async function updateAdminPost(postId: string, payload: AdminPostUpdate): Promise<AdminPostOut> {
+  return apiPatch<AdminPostOut>(`/admin/posts/${postId}`, payload);
+}
+
+export async function deleteAdminPost(postId: string): Promise<{ ok: boolean; deleted_post_id: string }> {
+  return apiDelete<{ ok: boolean; deleted_post_id: string }>(`/admin/posts/${postId}`);
+}

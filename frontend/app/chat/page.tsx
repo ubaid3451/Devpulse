@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useChatSocket } from "@/lib/chat-socket-context";
 import { useE2EE } from "@/lib/e2ee-context";
 import { cacheMessagePlaintext, getCachedMessagePlaintext } from "@/lib/message-plaintext-cache";
-import { showDesktopNotification, requestNotificationPermission, isTabHidden } from "@/lib/notifications";
+import { requestNotificationPermission, showDesktopNotification, isTabHidden } from "@/lib/notifications";
 import AppLayout from "@/components/AppLayout";
 import CreateGroupModal from "@/components/CreateGroupModal";
 import EmojiPicker, { Theme } from "emoji-picker-react";
@@ -21,6 +21,7 @@ import {
   uploadChatImage,
   startDirectConversation,
   hideConversation,
+  markConversationRead,
 } from "@/lib/api";
 
 export default function ChatPage() {
@@ -28,7 +29,7 @@ export default function ChatPage() {
   const searchParams = useSearchParams();
   const initialUsername = searchParams.get("user"); // optional: ?user=someusername
   const { user: currentUser } = useAuth();
-  const { onlineUsers, sendMessage, sendReaction, onChatMessage, onReactionUpdate } =
+  const { onlineUsers, sendMessage, sendReaction, onChatMessage, onReactionUpdate, onMessagesRead } =
     useChatSocket();
   const { isReady: e2eeReady, encryptFor, decryptFrom } = useE2EE();
 
@@ -51,10 +52,9 @@ export default function ChatPage() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Desktop notifications now live here (not in ChatSocketProvider) because
-  // this is the only place that has both (a) the decryption keys needed to
-  // turn ciphertext into a readable body, and (b) the real sender name from
-  // `conversations`. Ask for permission once, up front.
+  // Ask for desktop notification permission once, on mount — matches the
+  // "prompt on connect" intent, just moved here since this is where
+  // notifications actually get triggered (see onChatMessage below).
   useEffect(() => {
     requestNotificationPermission();
   }, []);
@@ -78,77 +78,21 @@ export default function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  // FIFO queue of plaintexts we've sent but haven't yet gotten the server's
-  // echo (with a real message id) for. Matched against onChatMessage events
-  // where sender_id === currentUser.id. Safe to assume FIFO order since a
-  // single WebSocket connection preserves message ordering.
   const pendingSentPlaintexts = useRef<string[]>([]);
+  // Keep a ref mirror of conversations/activeConversationId so the
+  // onChatMessage handler (registered once, see effect deps below) can read
+  // fresh values without needing to be re-subscribed on every conversation change.
+  const conversationsRef = useRef<ConversationResponse[]>([]);
+  const activeConversationIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
 
   const [decryptedPreviews, setDecryptedPreviews] = useState<Record<string, string>>({});
-
-  // Dedupes concurrent decrypt attempts for the same message id. Signal
-  // Protocol message keys are single-use — if two effects (history load,
-  // sidebar preview, live onChatMessage) try to decrypt the same ciphertext
-  // at the same time, the second one fails with MessageCounterError because
-  // the first already consumed the key. This makes concurrent callers await
-  // the same in-flight decrypt instead of each independently calling
-  // decryptFrom, and it also handles writing the plaintext cache itself so
-  // call sites don't need a separate cacheMessagePlaintext step.
-  const inFlightDecrypts = useRef<Map<string, Promise<string>>>(new Map());
-
-  const decryptOnce = (
-    messageId: string,
-    otherUsername: string,
-    payload: { content: string; msg_type: number }
-  ): Promise<string> => {
-    if (currentUser) {
-      const cached = getCachedMessagePlaintext(currentUser.id, messageId);
-      if (cached !== undefined) return Promise.resolve(cached);
-    }
-
-    const existing = inFlightDecrypts.current.get(messageId);
-    if (existing) return existing;
-
-    const promise = decryptFrom(otherUsername, payload)
-      .then((plaintext) => {
-        if (currentUser) cacheMessagePlaintext(currentUser.id, messageId, plaintext);
-        return plaintext;
-      })
-      .finally(() => {
-        inFlightDecrypts.current.delete(messageId);
-      });
-
-    inFlightDecrypts.current.set(messageId, promise);
-    return promise;
-  };
-
-  // Builds the desktop notification for an incoming message, given its
-  // already-decrypted (or plaintext, for unencrypted/group messages) body.
-  // Looks the sender up directly in `conversations` rather than relying on
-  // `getSenderInfo` below, since that one is scoped to the active
-  // conversation only — this needs to work for background conversations too.
-  const notifyForMessage = (msg: ChatMessageResponse, content: string) => {
-    console.log("notifyForMessage called", msg.conversation_id, content);
-    const convo = conversations.find((c) => c.conversation_id === msg.conversation_id);
-
-    let senderName = "Someone";
-    if (convo?.is_group) {
-      const sender = convo.participants.find((p) => p.id === msg.sender_id);
-      senderName = sender?.full_name || sender?.username || "Someone";
-    } else {
-      const other = convo?.participants[0];
-      senderName = other?.full_name || other?.username || "Someone";
-    }
-
-    showDesktopNotification({
-      title: `New message from ${senderName}`,
-      body: content || (msg.image_url ? "Sent an attachment" : "New message"),
-      tag: `chat-conv-${msg.conversation_id}`,
-      onClick: () => {
-        window.location.href = `/chat?id=${msg.conversation_id}`;
-      },
-    });
-  };
 
   const refreshConversations = () => {
     getConversations()
@@ -157,29 +101,28 @@ export default function ChatPage() {
 
         if (!currentUser || !e2eeReady) return;
 
-        // Decrypt each 1-on-1 conversation's last message for the sidebar
-        // preview. Uses the same plaintext cache as the chat view — if this
-        // message was already decrypted once (e.g. because the chat is
-        // currently open), we reuse that instead of re-decrypting (which
-        // would fail, since the one-time message key is already consumed).
         const previews: Record<string, string> = {};
         await Promise.all(
           convos.map(async (convo) => {
             if (convo.is_group || !convo.last_message_encrypted || !convo.last_message_id) return;
 
+            const cached = getCachedMessagePlaintext(currentUser.id, convo.last_message_id);
+            if (cached !== undefined) {
+              previews[convo.conversation_id] = cached;
+              return;
+            }
+
             const otherUsername = convo.participants[0]?.username;
             if (!otherUsername || !convo.last_message || convo.last_message_msg_type == null) return;
 
             try {
-              const plaintext = await decryptOnce(convo.last_message_id, otherUsername, {
+              const plaintext = await decryptFrom(otherUsername, {
                 content: convo.last_message,
                 msg_type: convo.last_message_msg_type,
               });
+              cacheMessagePlaintext(currentUser.id, convo.last_message_id, plaintext);
               previews[convo.conversation_id] = plaintext;
             } catch (err) {
-              // Most likely cause: this message's one-time key was already
-              // consumed by an earlier decrypt (e.g. while the chat was
-              // open before a reload). Fall back to the lock-icon placeholder.
               console.error("Failed to decrypt preview for", convo.conversation_id, err);
             }
           })
@@ -194,12 +137,10 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [e2eeReady]);
 
-  // If arriving via ?user=username (e.g. from a profile page "Message" button),
-  // resolve it to a conversation_id via the backend, then select it.
   useEffect(() => {
     if (!initialUsername) return;
     setIsResolvingConversation(true);
- startDirectConversation(initialUsername)
+    startDirectConversation(initialUsername)
       .then((res) => {
         setActiveConversationId(res.conversation_id);
         refreshConversations();
@@ -209,7 +150,7 @@ export default function ChatPage() {
         if (err?.status === 403) {
           alert("You can't message this user.");
         }
-        router.replace("/chat"); // clear the ?user= param so it doesn't retry on refresh
+        router.replace("/chat");
       })
       .finally(() => setIsResolvingConversation(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -226,36 +167,26 @@ export default function ChatPage() {
 
     getChatHistory(activeConversationId)
       .then(async (history) => {
-        // Decrypt any messages that carry an iv (i.e. were sent encrypted).
-        // Group chats and any plaintext-era messages pass through unchanged.
         if (!otherUsername || !e2eeReady) {
           setMessages(history);
           return;
         }
         const decrypted = await Promise.all(
           history.map(async (msg) => {
-            if (!msg.msg_type) return msg; // not encrypted — show as-is
+            if (!msg.msg_type) return msg;
 
-            // Check the local plaintext cache FIRST, for both directions:
-            // - your own sent messages can never be decrypted again (ratchet
-            //   already advanced when you encrypted them)
-            // - received messages' one-time message keys are deleted the
-            //   moment they're first decrypted (forward secrecy) — so a
-            //   second decrypt attempt on reload would fail even though it
-            //   worked the first time
             const cached = currentUser ? getCachedMessagePlaintext(currentUser.id, msg.id) : undefined;
             if (cached !== undefined) {
               return { ...msg, content: cached };
             }
 
             if (msg.sender_id === currentUser?.id) {
-              // Own message with no cache entry — this can happen for
-              // messages sent before this caching was added.
               return { ...msg, content: "[Sent message — not available on this device]" };
             }
 
             try {
-              const plaintext = await decryptOnce(msg.id, otherUsername, { content: msg.content, msg_type: msg.msg_type! });
+              const plaintext = await decryptFrom(otherUsername, { content: msg.content, msg_type: msg.msg_type! });
+              if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
               return { ...msg, content: plaintext };
             } catch (err) {
               console.error("Failed to decrypt message", msg.id, err);
@@ -290,76 +221,107 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Mark the conversation as read whenever it's opened (or new messages
+  // arrive while it's already open) — this both clears the unread badge
+  // and tells the OTHER participant(s) their sent messages have been seen.
+  useEffect(() => {
+    if (!activeConversationId) return;
+    markConversationRead(activeConversationId)
+      .then(() => {
+        // Optimistically clear the local unread badge immediately rather
+        // than waiting for the next refreshConversations() poll.
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.conversation_id === activeConversationId ? { ...c, unread_count: 0 } : c
+          )
+        );
+      })
+      .catch((err) => console.error("Failed to mark conversation read", err));
+  }, [activeConversationId, messages.length]);
+
+  // Live read-receipt updates: when the OTHER participant reads our sent
+  // messages, flip their is_read flag locally so the checkmark updates
+  // without needing a refetch.
+  useEffect(() => {
+    const unsub = onMessagesRead((event) => {
+      if (event.conversation_id !== activeConversationIdRef.current) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          event.message_ids.includes(m.id) ? { ...m, is_read: true } : m
+        )
+      );
+    });
+    return unsub;
+  }, [onMessagesRead]);
+
   // Subscribe to the shared root-level socket for message + reaction events.
-  // This page no longer owns a WebSocket connection — it just listens.
   useEffect(() => {
     const unsubMessage = onChatMessage(async (msg) => {
-      console.log("onChatMessage fired", msg, "isTabHidden:", isTabHidden());
       const isOwnMessage = msg.sender_id === currentUser?.id;
+      let plaintextContent = msg.content; // stays as ciphertext unless decrypted below
+      let toAppend = msg;
 
-      if (msg.conversation_id === activeConversationId) {
-        let toAppend = msg;
+      // Look up the conversation this message belongs to (not necessarily
+      // the currently-open one — a message can arrive for ANY conversation,
+      // and we need sender info to build a notification regardless of
+      // whether that chat is open).
+      const msgConvo = conversationsRef.current.find((c) => c.conversation_id === msg.conversation_id);
+      const otherUsername = msgConvo && !msgConvo.is_group ? msgConvo.participants[0]?.username : undefined;
 
-        if (isOwnMessage) {
-          // This is the server's echo of a message WE just sent. We already
-          // know the plaintext (we typed it) — grab it from the pending
-          // queue and cache it under the now-known real message id.
-          const pending = pendingSentPlaintexts.current.shift();
-          if (pending && currentUser) {
-            cacheMessagePlaintext(currentUser.id, msg.id, pending);
-            toAppend = { ...msg, content: pending };
-          } else if (currentUser) {
-            const cached = getCachedMessagePlaintext(currentUser.id, msg.id);
-            toAppend = { ...msg, content: cached ?? msg.content };
-          }
-        } else if (msg.msg_type && e2eeReady) {
-          const convo = conversations.find((c) => c.conversation_id === activeConversationId);
-          const otherUsername = !convo?.is_group ? convo?.participants[0]?.username : undefined;
-          if (otherUsername) {
-            try {
-              const plaintext = await decryptOnce(msg.id, otherUsername, { content: msg.content, msg_type: msg.msg_type! });
-              toAppend = { ...msg, content: plaintext };
-            } catch (err) {
-              console.error("Failed to decrypt incoming message", err);
-              toAppend = { ...msg, content: "[Unable to decrypt message]" };
-            }
-          }
+      if (isOwnMessage) {
+        const pending = pendingSentPlaintexts.current.shift();
+        if (pending && currentUser) {
+          cacheMessagePlaintext(currentUser.id, msg.id, pending);
+          plaintextContent = pending;
+        } else if (currentUser) {
+          plaintextContent = getCachedMessagePlaintext(currentUser.id, msg.id) ?? msg.content;
         }
-
-        setMessages((prev) => [...prev, toAppend]);
-
-        // Only notify for messages from other people, and only when the
-        // person isn't already looking at this tab. toAppend.content is
-        // guaranteed to be real plaintext at this point, never ciphertext.
-        if (!isOwnMessage && isTabHidden()) {
-          notifyForMessage(msg, toAppend.content);
+        toAppend = { ...msg, content: plaintextContent };
+      } else if (msg.msg_type && e2eeReady && otherUsername) {
+        try {
+          const plaintext = await decryptFrom(otherUsername, { content: msg.content, msg_type: msg.msg_type! });
+          if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
+          plaintextContent = plaintext;
+          toAppend = { ...msg, content: plaintext };
+        } catch (err) {
+          console.error("Failed to decrypt incoming message", err);
+          plaintextContent = "[Unable to decrypt message]";
+          toAppend = { ...msg, content: plaintextContent };
         }
-      } else if (!isOwnMessage) {
-        // Message arrived for a conversation that ISN'T the one currently
-        // open. We still need real plaintext for the notification body, so
-        // decrypt it here using the same cache-first approach used
-        // everywhere else in this file.
-        let notifyContent = msg.content;
-
-        if (msg.msg_type && e2eeReady) {
-          const convo = conversations.find((c) => c.conversation_id === msg.conversation_id);
-          const otherUsername = !convo?.is_group ? convo?.participants[0]?.username : undefined;
-
-          if (otherUsername) {
-            try {
-              notifyContent = await decryptOnce(msg.id, otherUsername, { content: msg.content, msg_type: msg.msg_type! });
-            } catch (err) {
-              // Falls back to a generic body rather than showing ciphertext.
-              console.error("Failed to decrypt message for notification", msg.id, err);
-              notifyContent = "";
-            }
-          }
-        }
-
-        if (isTabHidden()) {
-          notifyForMessage(msg, notifyContent);
-        }
+      } else {
+        // Not encrypted (plaintext-era message or group chat) — content is
+        // already readable as-is.
+        toAppend = msg;
       }
+
+      // Only append to the visible message list if this event belongs to
+      // the conversation currently open.
+      if (msg.conversation_id === activeConversationIdRef.current) {
+        setMessages((prev) => [...prev, toAppend]);
+      }
+
+      // Desktop notification: only for messages from someone ELSE, and only
+      // when the tab is backgrounded (otherwise the in-app UI is enough).
+      // Fires with the DECRYPTED plaintext — never raw ciphertext — since
+      // this runs after the decrypt logic above has already resolved it.
+      if (!isOwnMessage && isTabHidden()) {
+        const senderName =
+          msgConvo?.is_group
+            ? msgConvo.participants.find((p) => p.id === msg.sender_id)?.full_name
+              || msgConvo.participants.find((p) => p.id === msg.sender_id)?.username
+              || "Someone"
+            : msgConvo?.participants[0]?.full_name || msgConvo?.participants[0]?.username || "Someone";
+
+        showDesktopNotification({
+          title: `New message from ${senderName}`,
+          body: msg.image_url && !plaintextContent ? "Sent an attachment" : plaintextContent,
+          tag: `chat-conv-${msg.conversation_id}`,
+          onClick: () => {
+            router.push(`/chat?id=${msg.conversation_id}`);
+          },
+        });
+      }
+
       refreshConversations();
     });
 
@@ -374,9 +336,9 @@ export default function ChatPage() {
       unsubReaction();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConversationId, onChatMessage, onReactionUpdate, conversations, e2eeReady, decryptFrom]);
+  }, [onChatMessage, onReactionUpdate, e2eeReady, decryptFrom, currentUser?.id]);
 
-const selectSearchResultUser = async (user: AuthorResponse) => {
+  const selectSearchResultUser = async (user: AuthorResponse) => {
     setSearchQuery("");
     try {
       const res = await startDirectConversation(user.username);
@@ -389,7 +351,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
       }
     }
   };
-  
 
   const sendChatMessage = async () => {
     if ((!inputText.trim() && !attachedImage) || !activeConversationId || isUploading) return;
@@ -405,8 +366,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
       const convo = conversations.find((c) => c.conversation_id === activeConversationId);
       const otherUsername = !convo?.is_group ? convo?.participants[0]?.username : undefined;
 
-      // Encrypt for 1-on-1 chats once E2EE is ready. Group chats send
-      // plaintext for now — see the E2EE limitations note.
       if (otherUsername && e2eeReady && inputText.trim()) {
         const plaintext = inputText.trim();
         const { content, msg_type } = await encryptFor(otherUsername, plaintext);
@@ -451,7 +410,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
   };
 
   const activeConversation = conversations.find((c) => c.conversation_id === activeConversationId);
-  // For 1-on-1 chats there's exactly one "other" participant to show in the header.
   const activeOtherParticipant = activeConversation?.participants[0];
   const headerTitle = activeConversation?.is_group
     ? activeConversation?.name || "Group chat"
@@ -459,9 +417,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
   const headerAvatar = activeConversation?.is_group ? null : activeOtherParticipant?.avatar_url;
   const otherUserId = activeConversation?.is_group ? null : activeOtherParticipant?.id;
 
-  // Map every participant (including "me") to their avatar/name, so group
-  // chats can show each sender's own photo next to their messages instead
-  // of one fixed "other person" avatar.
   const participantMap: Record<string, { avatar_url: string | null; name: string }> = {};
   activeConversation?.participants.forEach((p) => {
     participantMap[p.id] = { avatar_url: p.avatar_url, name: p.full_name || p.username };
@@ -506,7 +461,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
 
           <div className="flex-1 overflow-y-auto">
             {searchQuery.trim() ? (
-              // Search Results
               isSearching ? (
                 <div className="p-4 text-center text-on-surface-variant text-sm">Searching...</div>
               ) : searchResults.length > 0 ? (
@@ -535,7 +489,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
                 <div className="p-4 text-center text-on-surface-variant text-sm">No users found.</div>
               )
             ) : (
-              // Conversations
               <>
                 {conversations.map((conv) => {
                   const other = conv.participants[0];
@@ -559,7 +512,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
                       >
                         <div className="relative">
                           {conv.is_group ? (
-                            // Group: show a small collage of up to 3 participant avatars
                             <div className="w-12 h-12 shrink-0 relative">
                               {conv.participants.slice(0, 3).map((p, i) => (
                                 <div
@@ -593,7 +545,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
                               )}
                             </div>
                           )}
-                          {/* Online dot indicator (1-on-1 only) */}
                           {!conv.is_group && other && onlineUsers.has(other.id) && (
                             <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-[#111318]"></div>
                           )}
@@ -608,9 +559,13 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
                               : conv.last_message || "No messages yet"}
                           </div>
                         </div>
+                        {conv.unread_count > 0 && (
+                          <div className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[#71d4ff] text-[#003548] text-[11px] font-bold flex items-center justify-center">
+                            {conv.unread_count > 99 ? "99+" : conv.unread_count}
+                          </div>
+                        )}
                       </div>
 
-                      {/* 3-dots Options Menu */}
                       <div className="relative shrink-0">
                         <button
                           type="button"
@@ -646,7 +601,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
                         )}
                       </div>
 
-                      {/* Delete Confirmation Modal Overlay */}
                       {isPendingDelete && (
                         <div
                           className="absolute inset-0 z-30 flex items-center justify-between gap-2 rounded-lg bg-[#1e2025] px-3 border border-red-500/30"
@@ -691,7 +645,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
             </div>
           ) : activeConversationId ? (
             <>
-              {/* Chat Header */}
               <div className="h-16 px-6 border-b border-outline-variant/30 flex justify-between items-center bg-[#0b0d10]/95 backdrop-blur-md sticky top-0 z-10">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full overflow-hidden bg-surface-variant shrink-0">
@@ -727,7 +680,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
                 </div>
               </div>
 
-              {/* Messages Area */}
               <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
                 <div className="text-center text-[12px] text-on-surface-variant/50 relative mb-4">
                   <span className="bg-[#0b0d10] px-3 relative z-10">Today</span>
@@ -794,7 +746,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
                           )}
                         </div>
 
-                        {/* Reaction Picker Popover */}
                         {activeReactionMsgId === msg.id && (
                           <div className={`absolute z-20 ${isMine ? "right-12" : "left-12"} mt-1`}>
                             <EmojiPicker
@@ -805,7 +756,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
                           </div>
                         )}
 
-                        {/* Render Reactions */}
                         {msg.reactions && msg.reactions.length > 0 && (
                           <div className={`flex flex-wrap gap-1 mt-1 ${isMine ? "justify-end" : "justify-start"}`}>
                             {Array.from(new Set(msg.reactions.map((r) => r.emoji))).map((emoji) => {
@@ -826,7 +776,15 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
                         )}
                         <div className="text-[11px] mt-1.5 text-on-surface-variant flex items-center gap-1">
                           {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                          {isMine && <span className="material-symbols-outlined text-[14px]">done_all</span>}
+                          {isMine && (
+                            <span
+                              className={`material-symbols-outlined text-[14px] ${
+                                msg.is_read ? "text-[#71d4ff]" : "text-on-surface-variant/60"
+                              }`}
+                            >
+                              done_all
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -835,7 +793,6 @@ const selectSearchResultUser = async (user: AuthorResponse) => {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Chat Input */}
               <div className="p-4 bg-[#0b0d10] border-t border-outline-variant/20">
                 <div className="bg-[#111318] border border-outline-variant/40 rounded-xl overflow-hidden focus-within:border-primary/50 transition-colors">
                   <div className="px-3 py-2 border-b border-outline-variant/20 flex gap-2 text-on-surface-variant relative">

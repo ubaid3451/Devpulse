@@ -8,7 +8,7 @@ import CreatePostModal from "@/components/CreatePostModal";
 
 interface AppLayoutProps {
   children: React.ReactNode;
-  activeNav?: "home" | "explore" | "messages" | "notifications";
+  activeNav?: "home" | "explore" | "messages" | "notifications" | "admin";
 }
 
 export default function AppLayout({ children, activeNav = "home" }: AppLayoutProps) {
@@ -26,6 +26,12 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
     { id: "explore", label: "Explore", icon: "explore", href: "/explore" },
     { id: "messages", label: "Messages", icon: "mail", href: "/chat" },
     { id: "notifications", label: "Notifications", icon: "notifications", href: "/notifications" },
+    // Admin link only shows up for admin-role users. Added conditionally here
+    // (rather than always rendered + hidden with CSS) so it never appears in
+    // the DOM at all for regular users.
+    ...(user?.role === "admin"
+      ? [{ id: "admin", label: "Admin", icon: "shield_person", href: "/admin" }]
+      : []),
   ];
 
   return (

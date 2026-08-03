@@ -56,6 +56,22 @@ class Settings(BaseSettings):
     cloudinary_api_key: str = ""
     cloudinary_api_secret: str = ""
 
+    # ── Admin ───────────────────────────────────────────────────────────────────
+    admin_emails: str = ""
+    admin_email: str = ""
+    admin_password: str = ""
+    admin_username: str = "devpulse_admin"
+
+    @property
+    def admin_emails_list(self) -> list[str]:
+        """All admin emails: ADMIN_EMAILS list + ADMIN_EMAIL single value."""
+        emails = [e.strip().lower() for e in self.admin_emails.split(",") if e.strip()]
+        if self.admin_email.strip():
+            single = self.admin_email.strip().lower()
+            if single not in emails:
+                emails.append(single)
+        return emails
+
 
 @lru_cache
 def get_settings() -> Settings:

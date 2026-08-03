@@ -4,22 +4,17 @@
  * ChatSocketProvider
  * ───────────────────
  * Owns ONE WebSocket connection for the entire app, opened once when the
- * user is authenticated and kept alive across route changes (dashboard,
- * feed, chat, profile, etc). Components consume it via useChatSocket()
- * instead of creating their own `new WebSocket(...)`.
+ * user is authenticated and kept alive across route changes.
  *
- * Why this matters:
- * - Previously the socket lived inside chat/page.tsx, so navigating away
- *   from /chat closed the connection and lost real-time updates (e.g. new
- *   message notifications) until the user reopened the chat page.
- * - A single root-level socket means presence, new messages, and reactions
- *   keep flowing everywhere in the app, not just while /chat is mounted.
- *
- * NOTE: This context is deliberately "dumb" about content — it just relays
- * raw events off the wire. Desktop notifications live in chat/page.tsx
- * instead, because that's the only place where messages get decrypted and
- * where we know the real sender's display name. Triggering a notification
- * here would either show ciphertext or a generic "Someone" label.
+ * NOTE ON DESKTOP NOTIFICATIONS: this context deliberately does NOT trigger
+ * desktop notifications, even though it's tempting to do so right here where
+ * every message arrives. The reason: for E2EE conversations, `chatMsg.content`
+ * at this layer is still base64 CIPHERTEXT — this context has no access to
+ * the Signal Protocol session state needed to decrypt it (that lives in
+ * chat/page.tsx via useE2EE()). Notifying from here would show raw
+ * gibberish instead of the actual message. Desktop notifications are
+ * triggered from chat/page.tsx's onChatMessage subscriber instead, AFTER
+ * decryption has produced real plaintext.
  */
 
 import React, {
@@ -32,8 +27,6 @@ import React, {
 } from "react";
 import { useAuth } from "./auth-context";
 import type { ChatMessageResponse } from "./api";
-
-// ── Event payload types coming from the server ──────────────────────────────
 
 interface PresenceEvent {
   type: "presence";
@@ -51,26 +44,28 @@ interface ReactionUpdateEvent {
   reactions: { user_id: string; emoji: string }[];
 }
 
-type IncomingEvent = PresenceEvent | ChatMessageEvent | ReactionUpdateEvent;
+interface MessagesReadEvent {
+  type: "messages_read";
+  conversation_id: string;
+  message_ids: string[];
+  read_by: string;
+}
 
-// ── Context shape ────────────────────────────────────────────────────────────
+type IncomingEvent = PresenceEvent | ChatMessageEvent | ReactionUpdateEvent | MessagesReadEvent;
 
 interface ChatSocketContextValue {
   isConnected: boolean;
   onlineUsers: Set<string>;
-  /** Send a new chat message into a conversation. */
   sendMessage: (
     conversationId: string,
     content: string,
     imageUrl?: string | null,
     msgType?: number | null
   ) => void;
-  /** Toggle/replace a reaction on a message. */
   sendReaction: (messageId: string, emoji: string) => void;
-  /** Subscribe to incoming chat_message events. Returns an unsubscribe fn. */
   onChatMessage: (handler: (msg: ChatMessageResponse) => void) => () => void;
-  /** Subscribe to incoming reaction_update events. Returns an unsubscribe fn. */
   onReactionUpdate: (handler: (msg: ReactionUpdateEvent) => void) => () => void;
+  onMessagesRead: (handler: (event: MessagesReadEvent) => void) => () => void;
 }
 
 const ChatSocketContext = createContext<ChatSocketContextValue | null>(null);
@@ -86,9 +81,9 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
   const [isConnected, setIsConnected] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
 
-  // Handler registries so multiple pages/components can subscribe independently
   const chatMessageHandlers = useRef(new Set<(msg: ChatMessageResponse) => void>());
   const reactionHandlers = useRef(new Set<(msg: ReactionUpdateEvent) => void>());
+  const messagesReadHandlers = useRef(new Set<(event: MessagesReadEvent) => void>());
 
   const connect = useCallback(() => {
     if (!user) return;
@@ -102,7 +97,6 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
     socket.onclose = () => {
       setIsConnected(false);
       socketRef.current = null;
-      // Auto-reconnect while the user is still logged in (e.g. after a network blip)
       if (shouldReconnectRef.current && user) {
         reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY_MS);
       }
@@ -130,13 +124,13 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
       } else if (data.type === "chat_message") {
         const { type, ...msg } = data;
         const chatMsg = msg as ChatMessageResponse;
-
-        // Just relay the raw event. Decryption + desktop notifications
-        // happen downstream in chat/page.tsx, where we actually have the
-        // keys and the sender's real name.
+        // Just relay it — decryption + desktop notifications happen
+        // downstream in chat/page.tsx where the E2EE session state lives.
         chatMessageHandlers.current.forEach((h) => h(chatMsg));
       } else if (data.type === "reaction_update") {
         reactionHandlers.current.forEach((h) => h(data));
+      } else if (data.type === "messages_read") {
+        messagesReadHandlers.current.forEach((h) => h(data));
       }
     };
 
@@ -149,7 +143,6 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
     if (user) {
       connect();
     } else {
-      // Logged out — tear down the connection
       shouldReconnectRef.current = false;
       socketRef.current?.close();
       socketRef.current = null;
@@ -200,6 +193,13 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
     };
   }, []);
 
+  const onMessagesRead = useCallback((handler: (event: MessagesReadEvent) => void) => {
+    messagesReadHandlers.current.add(handler);
+    return () => {
+      messagesReadHandlers.current.delete(handler);
+    };
+  }, []);
+
   return (
     <ChatSocketContext.Provider
       value={{
@@ -209,6 +209,7 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
         sendReaction,
         onChatMessage,
         onReactionUpdate,
+        onMessagesRead,
       }}
     >
       {children}

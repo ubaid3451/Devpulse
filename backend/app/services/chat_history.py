@@ -1,10 +1,10 @@
 """
-Read-side queries for conversations and chat history (group-chat capable).
+Read-side queries for conversations and chat history (group-chat capable, E2EE-aware, block-aware, read-receipt-aware).
 """
 
 from typing import List, Optional
 
-from sqlalchemy import select, desc, or_, and_
+from sqlalchemy import select, desc, or_, and_, func
 from sqlalchemy.orm import Session
 
 from app.models.user import User
@@ -13,20 +13,6 @@ from app.models.conversation import Conversation
 from app.models.conversation_participant import ConversationParticipant
 from app.models.block import Block
 from app.services.connection_manager import manager
-
-
-def _is_blocked_with_any(db: Session, user_id: str, other_ids: List[str]) -> bool:
-    if not other_ids:
-        return False
-    existing = db.execute(
-        select(Block).where(
-            or_(
-                and_(Block.blocker_id == user_id, Block.blocked_id.in_(other_ids)),
-                and_(Block.blocked_id == user_id, Block.blocker_id.in_(other_ids)),
-            )
-        )
-    ).scalar_one_or_none()
-    return existing is not None
 
 
 def get_online_user_ids() -> List[str]:
@@ -40,6 +26,18 @@ def _conversation_ids_for_user(db: Session, user_id: str) -> List[str]:
         )
     ).scalars().all()
     return list(rows)
+
+
+def _is_blocked_either_direction(db: Session, user_a_id: str, user_b_id: str) -> bool:
+    existing = db.execute(
+        select(Block).where(
+            or_(
+                and_(Block.blocker_id == user_a_id, Block.blocked_id == user_b_id),
+                and_(Block.blocker_id == user_b_id, Block.blocked_id == user_a_id),
+            )
+        )
+    ).scalar_one_or_none()
+    return existing is not None
 
 
 def get_conversations(db: Session, current_user: User) -> List[dict]:
@@ -69,30 +67,24 @@ def get_conversations(db: Session, current_user: User) -> List[dict]:
             )
         ).scalars().all()
 
-        other_ids = [u.id for u in other_participants]
-        is_blocked_by_me = False
-        has_blocked_me = False
-        if other_ids:
-            is_blocked_by_me = db.execute(
-                select(Block).where(
-                    Block.blocker_id == current_user.id,
-                    Block.blocked_id.in_(other_ids),
-                )
-            ).scalar_one_or_none() is not None
+        is_blocked = False
+        if not convo.is_group and other_participants:
+            is_blocked = _is_blocked_either_direction(db, current_user.id, other_participants[0].id)
 
-            has_blocked_me = db.execute(
-                select(Block).where(
-                    Block.blocked_id == current_user.id,
-                    Block.blocker_id.in_(other_ids),
-                )
-            ).scalar_one_or_none() is not None
-
-        is_blocked = is_blocked_by_me or has_blocked_me
+        # Unread count: messages in this conversation NOT sent by the
+        # current user, that they haven't marked as read yet.
+        unread_count = db.scalar(
+            select(func.count()).select_from(Message).where(
+                Message.conversation_id == convo.id,
+                Message.sender_id != current_user.id,
+                Message.is_read.is_(False),
+            )
+        ) or 0
 
         result.append({
             "conversation_id": convo.id,
             "is_group": convo.is_group,
-            "name": convo.name,  # group name, or None for 1-on-1
+            "name": convo.name,
             "participants": [
                 {
                     "id": u.id,
@@ -102,14 +94,13 @@ def get_conversations(db: Session, current_user: User) -> List[dict]:
                 }
                 for u in other_participants
             ],
+            "is_blocked": is_blocked,
+            "unread_count": unread_count,
             "last_message": last_message.content if last_message else None,
             "last_message_id": last_message.id if last_message else None,
             "last_message_msg_type": last_message.msg_type if last_message else None,
             "last_message_encrypted": bool(last_message and last_message.msg_type),
             "last_message_at": last_message.created_at if last_message else convo.created_at,
-            "is_blocked": is_blocked,
-            "is_blocked_by_me": is_blocked_by_me,
-            "has_blocked_me": has_blocked_me,
         })
 
     result.sort(key=lambda x: x["last_message_at"], reverse=True)
@@ -133,9 +124,6 @@ def get_chat_history(db: Session, current_user: User, conversation_id: str) -> O
         .order_by(Message.created_at)
     ).scalars().all()
 
-    print("Fetched messages:", messages)
-
-
     return [{
         "id": msg.id,
         "conversation_id": msg.conversation_id,
@@ -149,6 +137,37 @@ def get_chat_history(db: Session, current_user: User, conversation_id: str) -> O
     } for msg in messages]
 
 
+def mark_conversation_read(db: Session, current_user: User, conversation_id: str) -> List[str]:
+    """
+    Marks every unread message in this conversation (sent by someone else)
+    as read. Returns the list of message IDs that were actually updated, so
+    the caller can broadcast a read-receipt event for exactly those.
+    """
+    is_participant = db.execute(
+        select(ConversationParticipant).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.user_id == current_user.id,
+        )
+    ).scalar_one_or_none()
+    if not is_participant:
+        return []
+
+    unread_messages = db.execute(
+        select(Message).where(
+            Message.conversation_id == conversation_id,
+            Message.sender_id != current_user.id,
+            Message.is_read.is_(False),
+        )
+    ).scalars().all()
+
+    updated_ids = [m.id for m in unread_messages]
+    for msg in unread_messages:
+        msg.is_read = True
+    db.commit()
+
+    return updated_ids
+
+
 def create_group_conversation(
     db: Session, creator_id: str, member_ids: List[str], name: str
 ) -> Conversation:
@@ -157,7 +176,7 @@ def create_group_conversation(
 
     new_convo = Conversation(is_group=True, name=name)
     db.add(new_convo)
-    db.flush()  # get new_convo.id without committing yet
+    db.flush()
 
     for uid in all_member_ids:
         db.add(ConversationParticipant(conversation_id=new_convo.id, user_id=uid))
@@ -190,7 +209,7 @@ def get_or_create_direct_conversation(db: Session, user_a_id: str, user_b_id: st
 
     new_convo = Conversation(is_group=False)
     db.add(new_convo)
-    db.flush()  # get new_convo.id without committing yet
+    db.flush()
 
     db.add(ConversationParticipant(conversation_id=new_convo.id, user_id=user_a_id))
     db.add(ConversationParticipant(conversation_id=new_convo.id, user_id=user_b_id))

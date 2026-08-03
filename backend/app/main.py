@@ -17,6 +17,7 @@ from app.routers import auth as auth_router
 from app.routers import users
 from app.routers import posts
 from app.routers import chat
+from app.routers import admin
 
 settings = get_settings()
 
@@ -24,8 +25,52 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app_fastapi: FastAPI):
     """Application lifespan: startup / shutdown hooks."""
-    # Import models so they're registered with Base.metadata
     from app import models  # noqa: F401
+    from app.core.database import SessionLocal
+    from app.models.user import User
+    from app.core.security import hash_password
+    import uuid
+
+    db = SessionLocal()
+    try:
+        # ── 1. Auto-create master admin account from .env ─────────────────────
+        if settings.admin_email and settings.admin_password:
+            existing = db.query(User).filter(
+                User.email == settings.admin_email.lower()
+            ).first()
+            if existing:
+                # Account exists — ensure it is admin and password is up to date
+                existing.role = "admin"
+                existing.is_verified = True
+                existing.hashed_password = hash_password(settings.admin_password)
+            else:
+                # Create the master admin account fresh
+                admin_user = User(
+                    id=str(uuid.uuid4()),
+                    email=settings.admin_email.lower(),
+                    username=settings.admin_username,
+                    full_name="DevPulse Admin",
+                    hashed_password=hash_password(settings.admin_password),
+                    role="admin",
+                    is_verified=True,
+                    is_active=True,
+                )
+                db.add(admin_user)
+
+        # ── 2. Promote any emails listed in ADMIN_EMAILS to admin role ────────
+        for email in settings.admin_emails_list:
+            target_user = db.query(User).filter(User.email == email).first()
+            if target_user and target_user.role != "admin":
+                target_user.role = "admin"
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        import logging
+        logging.getLogger(__name__).warning(f"Admin setup failed: {e}")
+    finally:
+        db.close()
+
     yield
 
 
@@ -56,6 +101,7 @@ app.include_router(auth_router.router)
 app.include_router(users.router)
 app.include_router(posts.router)
 app.include_router(chat.router)
+app.include_router(admin.router)
 
 # Mount uploads directory for static file serving
 uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")

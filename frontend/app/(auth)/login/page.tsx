@@ -17,21 +17,35 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [isAdminMode, setIsAdminMode] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setIsLoading(true);
     try {
-      await login(email, password);
-      router.push("/feed");
+      const user = await login(email, password);
+      if (isAdminMode) {
+        if (user?.role !== "admin") {
+          setError("This account does not have admin privileges.");
+          setIsLoading(false);
+          return;
+        }
+        router.push("/admin");
+      } else {
+        if (user?.role === "admin") {
+          router.push("/admin");
+        } else {
+          router.push("/feed");
+        }
+      }
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.status === 403 && err.detail.includes("not verified")) {
+        if (err.status === 403 && err.detail?.includes("not verified")) {
           router.push(`/verify-otp?email=${encodeURIComponent(email)}`);
           return;
         }
-        setError(err.detail);
+        setError(err.detail || err.message);
       } else {
         setError("Something went wrong. Please try again.");
       }

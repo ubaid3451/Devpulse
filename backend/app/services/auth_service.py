@@ -14,9 +14,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password, verify_password
+from app.core.config import get_settings
 from app.models.otp import OTPRecord
 from app.models.user import User
 from app.services.email_service import send_otp_email, send_password_reset_email
+
+settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +155,10 @@ def authenticate_user(email: str, password: str, db: Session) -> User:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your account has been suspended. Contact support.",
         )
+    if user.email.lower() in settings.admin_emails_list and user.role != "admin":
+        user.role = "admin"
+        db.commit()
+        db.refresh(user)
     return user
 
 

@@ -8,17 +8,18 @@ from app.core.deps import CurrentUser, get_current_user_ws
 from app.services.connection_manager import manager
 from app.services import chat_history, chat_events, image_upload
 from app.models.block import Block
+from app.models.conversation_participant import ConversationParticipant
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 class StartDirectConversationRequest(BaseModel):
-    username: str  # the other user to start/find a 1-on-1 chat with
+    username: str
 
 
 class CreateGroupConversationRequest(BaseModel):
     name: str
-    usernames: list[str]  # other members to add (creator is added automatically)
+    usernames: list[str]
 
 
 @router.post("/upload_image")
@@ -52,7 +53,6 @@ def start_direct_conversation(
     current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
-    """Finds an existing 1-on-1 conversation with the given username, or creates one."""
     from app.models.user import User
 
     other_user = db.execute(select(User).where(User.username == body.username)).scalar_one_or_none()
@@ -61,7 +61,6 @@ def start_direct_conversation(
     if other_user.id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot start a conversation with yourself")
 
-    convo = chat_history.get_or_create_direct_conversation(db, current_user.id, other_user.id)
     is_blocked = db.execute(
         select(Block).where(
             or_(
@@ -69,9 +68,12 @@ def start_direct_conversation(
                 and_(Block.blocker_id == other_user.id, Block.blocked_id == current_user.id),
             )
         )
-    ).scalar_one_or_none() is not None
+    ).scalar_one_or_none()
+    if is_blocked:
+        raise HTTPException(status_code=403, detail="You can't message this user")
 
-    return {"conversation_id": convo.id, "is_group": convo.is_group, "is_blocked": is_blocked}
+    convo = chat_history.get_or_create_direct_conversation(db, current_user.id, other_user.id)
+    return {"conversation_id": convo.id, "is_group": convo.is_group}
 
 
 @router.post("/conversations/group")
@@ -108,6 +110,39 @@ def get_chat_history(
     if history is None:
         raise HTTPException(status_code=404, detail="Conversation not found or access denied")
     return history
+
+
+@router.post("/{conversation_id}/read")
+async def mark_conversation_read(
+    conversation_id: str,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    """
+    Marks all unread messages in this conversation (sent by the other
+    participant(s)) as read, then notifies THEM in real time so their UI
+    can update sent-message checkmarks from "delivered" to "read".
+    """
+    updated_message_ids = chat_history.mark_conversation_read(db, current_user, conversation_id)
+
+    if updated_message_ids:
+        other_participant_ids = db.execute(
+            select(ConversationParticipant.user_id).where(
+                ConversationParticipant.conversation_id == conversation_id,
+                ConversationParticipant.user_id != current_user.id,
+            )
+        ).scalars().all()
+
+        payload = {
+            "type": "messages_read",
+            "conversation_id": conversation_id,
+            "message_ids": updated_message_ids,
+            "read_by": current_user.id,
+        }
+        for participant_id in other_participant_ids:
+            await manager.send_personal_message(payload, participant_id)
+
+    return {"marked_read": len(updated_message_ids)}
 
 
 @router.websocket("/ws")
