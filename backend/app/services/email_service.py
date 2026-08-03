@@ -94,7 +94,7 @@ def send_otp_email(to_email: str, otp_code: str, full_name: str = "") -> bool:
       <meta charset="utf-8"/>
       <style>
         body {{ font-family: 'Inter', Arial, sans-serif; background:#0f1418; color:#dee3e8; margin:0; padding:0; }}
-        .container {{ max-width:520px; margin:40px auto; background:#1b2024; border:1px solid #3e484f; border-radius:12px; overflow:hidden; }}
+        .container {{ max-width:520px; margin:40px auto; background:#1b2026; border:1px solid #3e484f; border-radius:12px; overflow:hidden; }}
         .header {{ background:#0a0f12; padding:32px 40px; text-align:center; border-bottom:1px solid #3e484f; }}
         .logo {{ font-size:22px; font-weight:700; color:#dee3e8; letter-spacing:-0.02em; }}
         .logo span {{ color:#8ed5ff; }}
@@ -126,7 +126,7 @@ def send_otp_email(to_email: str, otp_code: str, full_name: str = "") -> bool:
             If you did not create a DevPulse account, you can safely ignore this email.
           </div>
         </div>
-        <div class="footer">© 2024 DevPulse · For developers, by developers.</div>
+        <div class="footer">© 2026 DevPulse · For developers, by developers.</div>
       </div>
     </body>
     </html>
@@ -144,7 +144,7 @@ def send_password_reset_email(to_email: str, otp_code: str, full_name: str = "")
       <meta charset="utf-8"/>
       <style>
         body {{ font-family: 'Inter', Arial, sans-serif; background:#0f1418; color:#dee3e8; margin:0; padding:0; }}
-        .container {{ max-width:520px; margin:40px auto; background:#1b2024; border:1px solid #3e484f; border-radius:12px; overflow:hidden; }}
+        .container {{ max-width:520px; margin:40px auto; background:#1b2026; border:1px solid #3e484f; border-radius:12px; overflow:hidden; }}
         .header {{ background:#0a0f12; padding:32px 40px; text-align:center; border-bottom:1px solid #3e484f; }}
         .logo {{ font-size:22px; font-weight:700; color:#dee3e8; letter-spacing:-0.02em; }}
         .logo span {{ color:#8ed5ff; }}
@@ -176,7 +176,7 @@ def send_password_reset_email(to_email: str, otp_code: str, full_name: str = "")
             If you did not request a password reset, you can safely ignore this email.
           </div>
         </div>
-        <div class="footer">© 2024 DevPulse · For developers, by developers.</div>
+        <div class="footer">© 2026 DevPulse · For developers, by developers.</div>
       </div>
     </body>
     </html>

@@ -335,7 +335,7 @@ export default function RegisterPage() {
       <footer className="w-full bg-background mt-auto">
         <div className="flex flex-col md:flex-row justify-between items-center w-full px-md py-lg max-w-container-max mx-auto gap-md border-t border-outline-variant">
           <div className="text-label-caps font-bold text-on-surface-variant">
-            © 2024 DEVPULSE. FOR DEVELOPERS BY DEVELOPERS.
+            © 2026 DEVPULSE. FOR DEVELOPERS BY DEVELOPERS.
           </div>
           <nav className="flex gap-lg flex-wrap justify-center">
             <a

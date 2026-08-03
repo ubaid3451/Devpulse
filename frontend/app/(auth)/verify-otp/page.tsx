@@ -245,7 +245,7 @@ function VerifyOTPContent() {
       {/* Footer */}
       <footer className="flex flex-col md:flex-row justify-between items-center w-full px-md py-lg max-w-container-max mx-auto gap-md border-t border-outline-variant">
         <div className="text-label-caps font-bold text-on-surface-variant">
-          © 2024 DevPulse. For developers by developers.
+          © 2026 DevPulse. For developers by developers.
         </div>
         <div className="flex gap-md">
           <a

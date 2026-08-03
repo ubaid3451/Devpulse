@@ -55,7 +55,7 @@ const config: Config = {
         "primary-fixed": "#c4e7ff",
         "on-surface-variant": "#bdc8d1",
         "on-secondary-fixed-variant": "#404751",
-        "surface-container": "#1b2024",
+        "surface-container": "#1b2026",
         "on-secondary": "#29313a"
       },
       borderRadius: {

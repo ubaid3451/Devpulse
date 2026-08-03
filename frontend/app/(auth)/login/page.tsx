@@ -289,7 +289,7 @@ export default function LoginPage() {
         <footer className="absolute bottom-0 w-full p-md text-center md:text-left">
           <div className="flex flex-wrap justify-center md:justify-start gap-md border-t border-outline-variant/30 pt-md max-w-[400px] mx-auto md:mx-0">
             <span className="text-label-caps font-label-caps text-outline">
-              © 2024 DevPulse
+              © 2026 DevPulse
             </span>
             <a
               href="#"
