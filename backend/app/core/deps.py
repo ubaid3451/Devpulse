@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Callable
 
 from fastapi import Cookie, Depends, HTTPException, status
 from jose import JWTError
@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import ACCESS_COOKIE, decode_token
 from app.models.user import User
+from app.models.admin_permission import AdminPermission
 
 
 def get_current_user(
@@ -80,8 +81,8 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
 def require_admin(current_user: CurrentUser) -> User:
-    """Dependency that additionally requires admin role."""
-    if current_user.role != "admin":
+    """Dependency that requires admin or superadmin role."""
+    if current_user.role not in ("admin", "superadmin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
@@ -89,4 +90,57 @@ def require_admin(current_user: CurrentUser) -> User:
     return current_user
 
 
+def require_superadmin(current_user: CurrentUser) -> User:
+    """Dependency that requires superadmin role only."""
+    if current_user.role != "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superadmin access required",
+        )
+    return current_user
+
+
+def require_permission(permission: str) -> Callable:
+    """
+    Factory that returns a FastAPI dependency checking for a specific permission.
+    Superadmins always pass. Admins must have the permission in admin_permissions table.
+    """
+    def _check(
+        current_user: CurrentUser,
+        db: Session = Depends(get_db),
+    ) -> User:
+        # Superadmin has all permissions implicitly
+        if current_user.role == "superadmin":
+            return current_user
+        if current_user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin access required",
+            )
+        # Check the admin_permissions table
+        grant = db.execute(
+            select(AdminPermission).where(
+                AdminPermission.user_id == current_user.id,
+                AdminPermission.permission == permission,
+            )
+        ).scalar_one_or_none()
+        if not grant:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission '{permission}' required",
+            )
+        return current_user
+
+    return _check
+
+
 AdminUser = Annotated[User, Depends(require_admin)]
+SuperAdminUser = Annotated[User, Depends(require_superadmin)]
+
+# Permission-gated dependency aliases
+CanViewStats   = Annotated[User, Depends(require_permission("view_stats"))]
+CanViewUsers   = Annotated[User, Depends(require_permission("view_users"))]
+CanManageUsers = Annotated[User, Depends(require_permission("manage_users"))]
+CanViewPosts   = Annotated[User, Depends(require_permission("view_posts"))]
+CanEditPosts   = Annotated[User, Depends(require_permission("edit_posts"))]
+CanDeletePosts = Annotated[User, Depends(require_permission("delete_posts"))]

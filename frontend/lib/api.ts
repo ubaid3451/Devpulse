@@ -257,11 +257,12 @@ export interface AdminUserOut {
   email: string;
   username: string;
   full_name: string;
-  role: string;
+  role: "user" | "admin" | "superadmin";
   is_active: boolean;
   is_verified: boolean;
   avatar_url?: string | null;
   created_at: string;
+  permissions: string[];
 }
 
 export interface AdminUserListResponse {
@@ -300,6 +301,20 @@ export interface AdminPostUpdate {
   content?: string | null;
   is_archived?: boolean | null;
 }
+
+export interface AdminPermissionOut {
+  user_id: string;
+  permissions: string[];
+}
+
+export const ALL_PERMISSIONS = [
+  { key: "view_stats",   label: "View Dashboard Stats" },
+  { key: "view_users",   label: "View Users" },
+  { key: "manage_users", label: "Manage Users (block/unblock/promote)" },
+  { key: "view_posts",   label: "View Posts" },
+  { key: "edit_posts",   label: "Edit Posts (archive/unarchive/edit)" },
+  { key: "delete_posts", label: "Delete Posts" },
+] as const;
 
 // ── Authentication API Functions ─────────────────────────────────────────────
 
@@ -530,3 +545,22 @@ export async function updateAdminPost(postId: string, payload: AdminPostUpdate):
 export async function deleteAdminPost(postId: string): Promise<{ ok: boolean; deleted_post_id: string }> {
   return apiDelete<{ ok: boolean; deleted_post_id: string }>(`/admin/posts/${postId}`);
 }
+
+export async function getAdminUserPermissions(userId: string): Promise<AdminPermissionOut> {
+  return apiGet<AdminPermissionOut>(`/admin/users/${userId}/permissions`);
+}
+
+export async function updateAdminUserPermissions(userId: string, permissions: string[]): Promise<AdminPermissionOut> {
+  // Uses PUT (full replacement), not PATCH
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/admin/users/${userId}/permissions`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ permissions }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.detail || "Failed to update permissions");
+  }
+  return res.json();
+}

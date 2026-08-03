@@ -155,7 +155,14 @@ def authenticate_user(email: str, password: str, db: Session) -> User:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your account has been suspended. Contact support.",
         )
-    if user.email.lower() in settings.admin_emails_list and user.role != "admin":
+    if user.email.lower() == (settings.admin_email or "").lower() and settings.admin_email:
+        # Master admin from .env → always superadmin
+        if user.role != "superadmin":
+            user.role = "superadmin"
+            db.commit()
+            db.refresh(user)
+    elif user.email.lower() in settings.admin_emails_list and user.role == "user":
+        # Extra admins from ADMIN_EMAILS → promote to admin (not superadmin)
         user.role = "admin"
         db.commit()
         db.refresh(user)

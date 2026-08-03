@@ -140,25 +140,35 @@ export default function AdminDashboardPage() {
   const router = useRouter();
   const { user } = useAuth();
   const [stats, setStats] = useState<AdminStatsResponse | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Client-side guard. The real enforcement is the backend AdminUser
-  // dependency (returns 403 for non-admins) — this just avoids flashing
-  // admin UI at a regular user before the API call fails.
+  // Client-side guard — redirect non-admin/superadmin users.
   useEffect(() => {
-    if (user && user.role !== "admin") {
+    if (user && user.role !== "admin" && user.role !== "superadmin") {
       router.replace("/feed");
     }
   }, [user, router]);
 
+  // Always attempt to load stats — backend enforces view_stats permission.
+  // If admin lacks permission, backend returns 403 → we show the lock UI.
   useEffect(() => {
-    if (!user || user.role !== "admin") return;
+    if (!user || (user.role !== "admin" && user.role !== "superadmin")) return;
+    setForbidden(false);
+    setError(null);
     getAdminStats()
       .then(setStats)
-      .catch((err) => setError(err?.message || "Failed to load stats"));
+      .catch((err) => {
+        const msg: string = err?.message || "";
+        if (msg.toLowerCase().includes("permission") || msg.includes("403")) {
+          setForbidden(true);
+        } else {
+          setError(msg || "Failed to load stats");
+        }
+      });
   }, [user]);
 
-  if (!user || user.role !== "admin") return null;
+  if (!user || (user.role !== "admin" && user.role !== "superadmin")) return null;
 
   return (
     <AppLayout activeNav="admin">
@@ -172,7 +182,13 @@ export default function AdminDashboardPage() {
             <div className="mb-4 p-3 rounded-lg bg-error-container/20 text-error text-sm">{error}</div>
           )}
 
-          {!stats ? (
+          {forbidden ? (
+            <div className="flex flex-col items-center justify-center py-16 text-on-surface-variant">
+              <span className="material-symbols-outlined text-[48px] mb-3 opacity-40">lock</span>
+              <p className="text-sm font-medium">You don't have access to view dashboard stats.</p>
+              <p className="text-[13px] mt-1 opacity-60">Ask your superadmin to grant you the <code className="bg-white/5 px-1 rounded">view_stats</code> permission.</p>
+            </div>
+          ) : !stats ? (
             <div className="text-on-surface-variant text-sm">Loading stats...</div>
           ) : (
             <>
@@ -197,4 +213,4 @@ export default function AdminDashboardPage() {
       </div>
     </AppLayout>
   );
-}
+}

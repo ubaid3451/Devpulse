@@ -25,53 +25,58 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app_fastapi: FastAPI):
     """Application lifespan: startup / shutdown hooks."""
+    import logging
+    import uuid as _uuid
     from app import models  # noqa: F401
     from app.core.database import SessionLocal
     from app.models.user import User
+    from app.models.admin_permission import AdminPermission, VALID_PERMISSIONS
     from app.core.security import hash_password
-    import uuid
 
     db = SessionLocal()
+    log = logging.getLogger(__name__)
     try:
-        # ── 1. Auto-create master admin account from .env ─────────────────────
+        # ── 1. Auto-create / update master superadmin account from .env ────────
         if settings.admin_email and settings.admin_password:
             existing = db.query(User).filter(
                 User.email == settings.admin_email.lower()
             ).first()
             if existing:
-                # Account exists — ensure it is admin and password is up to date
-                existing.role = "admin"
+                existing.role = "superadmin"
                 existing.is_verified = True
                 existing.hashed_password = hash_password(settings.admin_password)
             else:
-                # Create the master admin account fresh
-                admin_user = User(
-                    id=str(uuid.uuid4()),
+                existing = User(
+                    id=str(_uuid.uuid4()),
                     email=settings.admin_email.lower(),
                     username=settings.admin_username,
                     full_name="DevPulse Admin",
                     hashed_password=hash_password(settings.admin_password),
-                    role="admin",
+                    role="superadmin",
                     is_verified=True,
                     is_active=True,
                 )
-                db.add(admin_user)
+                db.add(existing)
+                db.flush()   # get the id before seeding permissions
 
-        # ── 2. Promote any emails listed in ADMIN_EMAILS to admin role ────────
+        # ── 2. Promote ADMIN_EMAILS list to admin (not superadmin) ─────────────
         for email in settings.admin_emails_list:
-            target_user = db.query(User).filter(User.email == email).first()
-            if target_user and target_user.role != "admin":
-                target_user.role = "admin"
+            if email == (settings.admin_email or "").lower():
+                continue  # already handled above as superadmin
+            target = db.query(User).filter(User.email == email).first()
+            if target and target.role not in ("admin", "superadmin"):
+                target.role = "admin"
 
         db.commit()
+        log.info("Admin setup complete.")
     except Exception as e:
         db.rollback()
-        import logging
-        logging.getLogger(__name__).warning(f"Admin setup failed: {e}")
+        log.warning(f"Admin setup failed: {e}")
     finally:
         db.close()
 
     yield
+
 
 
 app = FastAPI(

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.post import Post, Comment, Like
     from app.models.follow import Follow
     from app.models.message import Message
+    from app.models.admin_permission import AdminPermission
 
 
 class User(Base):
@@ -37,9 +38,9 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
 
-    # Role-based access control (user | admin) — needed for Milestone 4 admin panel
+    # Role-based access control (user | admin | superadmin) — needed for Milestone 4 admin panel
     role: Mapped[str] = mapped_column(
-        Enum("user", "admin", name="user_role_enum"),
+        Enum("user", "admin", "superadmin", name="user_role_enum"),
         nullable=False,
         default="user",
         server_default="user",
@@ -107,6 +108,13 @@ class User(Base):
         foreign_keys="[Message.sender_id]",
         back_populates="sender",
         cascade="all, delete-orphan"
+    )
+
+    # Admin permissions (only populated for role == 'admin')
+    admin_permissions: Mapped[list["AdminPermission"]] = relationship(
+        "AdminPermission",
+        back_populates="user",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:

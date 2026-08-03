@@ -4,6 +4,7 @@ Destination: backend/app/schemas/admin.py  (new file)
 """
 
 from datetime import datetime
+from typing import Literal
 from pydantic import BaseModel
 
 
@@ -39,6 +40,7 @@ class AdminUserOut(BaseModel):
     is_verified: bool
     avatar_url: str | None
     created_at: datetime
+    permissions: list[str] = []   # populated for admins; empty for users/superadmins
 
     class Config:
         from_attributes = True
@@ -77,10 +79,21 @@ class AdminPostListResponse(BaseModel):
 
 
 class AdminUserRoleUpdate(BaseModel):
-    role: str  # "user" or "admin"
+    role: Literal["user", "admin", "superadmin"]
 
 
 class AdminPostUpdate(BaseModel):
     title: str | None = None
     content: str | None = None
     is_archived: bool | None = None
+
+
+# ── Permission management ─────────────────────────────────────────────────────
+
+class AdminPermissionOut(BaseModel):
+    user_id: str
+    permissions: list[str]
+
+
+class AdminPermissionUpdate(BaseModel):
+    permissions: list[str]   # full replacement set

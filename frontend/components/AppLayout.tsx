@@ -29,7 +29,7 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
     // Admin link only shows up for admin-role users. Added conditionally here
     // (rather than always rendered + hidden with CSS) so it never appears in
     // the DOM at all for regular users.
-    ...(user?.role === "admin"
+    ...(user?.role === "admin" || user?.role === "superadmin"
       ? [{ id: "admin", label: "Admin", icon: "shield_person", href: "/admin" }]
       : []),
   ];
@@ -54,7 +54,7 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
         </div>
       </header>
 
-      <div className="flex w-full max-w-[1440px] mx-auto min-h-screen">
+      <div className="flex w-full min-h-screen">
         {/* Sidebar Navigation (Desktop) */}
         <aside className="hidden md:flex flex-col h-screen sticky top-0 w-64 bg-surface border-r border-outline-variant shrink-0">
           <div className="p-lg flex items-center gap-2">

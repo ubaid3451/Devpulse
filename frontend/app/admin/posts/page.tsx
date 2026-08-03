@@ -39,6 +39,11 @@ export default function AdminPostsPage() {
   const router = useRouter();
   const { user: currentUser } = useAuth();
 
+  // Permission helpers — always attempt actions; backend enforces permissions.
+  // We show all buttons and handle 403 errors from the API inline.
+  const canEdit = true;
+  const canDelete = true;
+
   const [posts, setPosts] = useState<AdminPostOut[]>([]);
   const [total, setTotal] = useState(0);
   const [skip, setSkip] = useState(0);
@@ -54,7 +59,7 @@ export default function AdminPostsPage() {
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   useEffect(() => {
-    if (currentUser && currentUser.role !== "admin") {
+    if (currentUser && currentUser.role !== "admin" && currentUser.role !== "superadmin") {
       router.replace("/feed");
     }
   }, [currentUser, router]);
@@ -72,13 +77,13 @@ export default function AdminPostsPage() {
   };
 
   useEffect(() => {
-    if (!currentUser || currentUser.role !== "admin") return;
+    if (!currentUser || (currentUser.role !== "admin" && currentUser.role !== "superadmin")) return;
     loadPosts(0, "", includeArchived);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
   useEffect(() => {
-    if (!currentUser || currentUser.role !== "admin") return;
+    if (!currentUser || (currentUser.role !== "admin" && currentUser.role !== "superadmin")) return;
     const delay = setTimeout(() => loadPosts(0, search, includeArchived), 300);
     return () => clearTimeout(delay);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -118,7 +123,7 @@ export default function AdminPostsPage() {
     }
   };
 
-  if (!currentUser || currentUser.role !== "admin") return null;
+  if (!currentUser || (currentUser.role !== "admin" && currentUser.role !== "superadmin")) return null;
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.floor(skip / PAGE_SIZE) + 1;
@@ -206,18 +211,25 @@ export default function AdminPostsPage() {
                       <td className="px-4 py-3">
                         <div className="flex flex-col items-end gap-1.5">
                           <div className="flex gap-2">
-                            <button
-                              onClick={() => openEdit(p)}
-                              className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-[#1e2025] hover:bg-[#1e2025]/70 transition-colors"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => setConfirmDeleteId(p.id)}
-                              className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
-                            >
-                              Delete
-                            </button>
+                            {canEdit && (
+                              <button
+                                onClick={() => openEdit(p)}
+                                className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-[#1e2025] hover:bg-[#1e2025]/70 transition-colors"
+                              >
+                                Edit
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button
+                                onClick={() => setConfirmDeleteId(p.id)}
+                                className="px-3 py-1.5 rounded-lg text-[12px] font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                              >
+                                Delete
+                              </button>
+                            )}
+                            {!canEdit && !canDelete && (
+                              <span className="text-[12px] text-on-surface-variant/40">Read-only</span>
+                            )}
                           </div>
                           {confirmDeleteId === p.id && (
                             <div className="flex items-center gap-1.5 bg-[#1e2025] border border-red-500/30 rounded-lg px-2 py-1">
