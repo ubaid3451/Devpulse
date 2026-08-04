@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useChatSocket } from "@/lib/chat-socket-context";
@@ -24,7 +24,7 @@ import {
   markConversationRead,
 } from "@/lib/api";
 
-export default function ChatPage() {
+function ChatPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialUsername = searchParams.get("user"); // optional: ?user=someusername
@@ -892,5 +892,13 @@ export default function ChatPage() {
         />
       )}
     </AppLayout>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-surface text-on-surface">Loading chat...</div>}>
+      <ChatPageContent />
+    </Suspense>
   );
 }
