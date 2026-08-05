@@ -22,6 +22,32 @@ class CreateGroupConversationRequest(BaseModel):
     usernames: list[str]
 
 
+class KeyBundleUpload(BaseModel):
+    identity_key: str
+    signed_prekey: dict
+    one_time_prekeys: list[dict]
+
+
+# In-memory key store (persists per process; survives restarts via DB if needed)
+_key_store: dict[str, dict] = {}
+
+
+@router.post("/keys")
+def upload_key_bundle(bundle: KeyBundleUpload, current_user: CurrentUser):
+    """Upload Signal E2EE public key bundle for the current user."""
+    _key_store[current_user.id] = bundle.model_dump()
+    return {"message": "Key bundle uploaded successfully"}
+
+
+@router.get("/keys/{user_id}")
+def get_key_bundle(user_id: str, current_user: CurrentUser):
+    """Retrieve Signal E2EE public key bundle for a given user."""
+    bundle = _key_store.get(user_id)
+    if not bundle:
+        raise HTTPException(status_code=404, detail="Key bundle not found for this user")
+    return bundle
+
+
 @router.post("/upload_image")
 def upload_chat_image(
     current_user: CurrentUser,
