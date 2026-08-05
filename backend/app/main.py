@@ -89,9 +89,15 @@ app = FastAPI(
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
+origins = [
+    settings.frontend_url,
+    "https://devpulse-eight-xi.vercel.app",
+    "https://devpulse-3oj8saa3r-ubaid3451s-projects.vercel.app",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url],
+    allow_origins=origins,
     allow_credentials=True,          # Required for cookies
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
