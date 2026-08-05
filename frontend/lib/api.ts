@@ -3,7 +3,10 @@
  * Base client handling API calls to FastAPI backend with CORS/Credentials.
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "https://secrets-setting-stamp-five.trycloudflare.com";
 
 export class ApiError extends Error {
   status: number;

@@ -89,7 +89,12 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
     if (!user) return;
     if (socketRef.current && socketRef.current.readyState <= WebSocket.OPEN) return;
 
-    const wsUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/^http/, "ws") || "ws://localhost:8000";
+    const baseApi =
+      process.env.NEXT_PUBLIC_WS_BASE_URL ||
+      process.env.NEXT_PUBLIC_API_URL?.replace(/^http/, "ws") ||
+      process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/^http/, "ws") ||
+      "wss://secrets-setting-stamp-five.trycloudflare.com";
+    const wsUrl = baseApi.replace(/\/$/, "");
     const socket = new WebSocket(`${wsUrl}/chat/ws`);
 
     socket.onopen = () => setIsConnected(true);
