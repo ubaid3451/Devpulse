@@ -147,7 +147,7 @@ async def mark_conversation_read(
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
-    token = websocket.cookies.get("access_token")
+    token = websocket.cookies.get("access_token") or websocket.query_params.get("token")
     if not token:
         await websocket.close(code=1008)
         return

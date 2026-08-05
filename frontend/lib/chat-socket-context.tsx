@@ -95,7 +95,8 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
       process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/^http/, "ws") ||
       "wss://secrets-setting-stamp-five.trycloudflare.com";
     const wsUrl = baseApi.replace(/\/$/, "");
-    const socket = new WebSocket(`${wsUrl}/chat/ws`);
+    const token = localStorage.getItem("devpulse_access_token") || "";
+    const socket = new WebSocket(`${wsUrl}/chat/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`);
 
     socket.onopen = () => setIsConnected(true);
 
