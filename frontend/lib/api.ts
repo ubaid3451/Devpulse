@@ -6,7 +6,7 @@
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "https://secrets-setting-stamp-five.trycloudflare.com";
+  "https://brief-immigrants-award-loud.trycloudflare.com";
 
 export class ApiError extends Error {
   status: number;
