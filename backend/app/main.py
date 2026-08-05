@@ -89,35 +89,21 @@ app = FastAPI(
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
-
-class DynamicCORSMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        origin = request.headers.get("origin")
-        
-        # Handle preflight OPTIONS request directly
-        if request.method == "OPTIONS":
-            response = Response(status_code=204)
-        else:
-            response = await call_next(request)
-            
-        if origin:
-            # Match any .vercel.app domain, localhost, or configured FRONTEND_URL
-            if (
-                origin == settings.frontend_url
-                or "localhost" in origin
-                or "127.0.0.1" in origin
-                or origin.endswith(".vercel.app")
-            ):
-                response.headers["Access-Control-Allow-Origin"] = origin
-                response.headers["Access-Control-Allow-Credentials"] = "true"
-                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
-                
-        return response
-
-app.add_middleware(DynamicCORSMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        settings.frontend_url,
+        "https://devpulse-eight-xi.vercel.app",
+        "https://devpulse-3oj8saa3r-ubaid3451s-projects.vercel.app",
+        "https://devpulse-e16xlvzbp-ubaid3451s-projects.vercel.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_origin_regex=r"https://.*devpulse.*\.vercel\.app",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
 from starlette.middleware.sessions import SessionMiddleware
