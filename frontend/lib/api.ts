@@ -3,10 +3,10 @@
  * Base client handling API calls to FastAPI backend with CORS/Credentials.
  */
 
-const BASE_URL =
+export const BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "http://13.126.205.138.nip.io";
+  "https://13.126.205.138.nip.io";
 
 export class ApiError extends Error {
   status: number;
@@ -43,9 +43,17 @@ async function handleResponse<T>(res: Response): Promise<T> {
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
   const headers = new Headers(options.headers || {});
-  
+
   if (!(options.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
+  }
+
+  // Fallback for Incognito mode where cross-site cookies are blocked by browser
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("devpulse_access_token");
+    if (token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
   }
 
   const res = await fetch(url, {
@@ -555,7 +563,7 @@ export async function getAdminUserPermissions(userId: string): Promise<AdminPerm
 
 export async function updateAdminUserPermissions(userId: string, permissions: string[]): Promise<AdminPermissionOut> {
   // Uses PUT (full replacement), not PATCH
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/admin/users/${userId}/permissions`, {
+  const res = await fetch(`${BASE_URL}/admin/users/${userId}/permissions`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     credentials: "include",

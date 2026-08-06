@@ -93,7 +93,7 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
       process.env.NEXT_PUBLIC_WS_BASE_URL ||
       process.env.NEXT_PUBLIC_API_URL?.replace(/^http/, "ws") ||
       process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/^http/, "ws") ||
-      "wss://brief-immigrants-award-loud.trycloudflare.com";
+      "wss://13.126.205.138.nip.io";
     const wsUrl = baseApi.replace(/\/$/, "");
     const token = localStorage.getItem("devpulse_access_token") || "";
     const socket = new WebSocket(`${wsUrl}/chat/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`);
