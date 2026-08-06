@@ -28,24 +28,87 @@ class KeyBundleUpload(BaseModel):
     one_time_prekeys: list[dict]
 
 
-# In-memory key store (persists per process; survives restarts via DB if needed)
-_key_store: dict[str, dict] = {}
-
-
 @router.post("/keys")
-def upload_key_bundle(bundle: KeyBundleUpload, current_user: CurrentUser):
-    """Upload Signal E2EE public key bundle for the current user."""
-    _key_store[current_user.id] = bundle.model_dump()
+def upload_key_bundle(bundle: KeyBundleUpload, current_user: CurrentUser, db: Session = Depends(get_db)):
+    """Upload Signal E2EE public key bundle for the current user — persisted to DB."""
+    from app.models.user import User
+    from app.models.signed_prekey import SignedPreKey
+    from app.models.one_time_prekey import OneTimePreKey
+
+    # Store identity public key on the user record
+    user = db.get(User, current_user.id)
+    user.identity_public_key = bundle.identity_key
+    db.flush()
+
+    # Upsert signed pre-key (one per user)
+    existing_spk = db.execute(
+        select(SignedPreKey).where(SignedPreKey.user_id == current_user.id)
+    ).scalar_one_or_none()
+    if existing_spk:
+        existing_spk.key_id = bundle.signed_prekey["keyId"]
+        existing_spk.public_key = bundle.signed_prekey["publicKey"]
+        existing_spk.signature = bundle.signed_prekey["signature"]
+    else:
+        db.add(SignedPreKey(
+            user_id=current_user.id,
+            key_id=bundle.signed_prekey["keyId"],
+            public_key=bundle.signed_prekey["publicKey"],
+            signature=bundle.signed_prekey["signature"],
+        ))
+
+    # Add new one-time pre-keys (avoid duplicates)
+    existing_key_ids = set(db.execute(
+        select(OneTimePreKey.key_id).where(OneTimePreKey.user_id == current_user.id)
+    ).scalars().all())
+    for otk in bundle.one_time_prekeys:
+        if otk["keyId"] not in existing_key_ids:
+            db.add(OneTimePreKey(
+                user_id=current_user.id,
+                key_id=otk["keyId"],
+                public_key=otk["publicKey"],
+            ))
+
+    db.commit()
     return {"message": "Key bundle uploaded successfully"}
 
 
 @router.get("/keys/{user_id}")
-def get_key_bundle(user_id: str, current_user: CurrentUser):
-    """Retrieve Signal E2EE public key bundle for a given user."""
-    bundle = _key_store.get(user_id)
-    if not bundle:
+def get_key_bundle(user_id: str, current_user: CurrentUser, db: Session = Depends(get_db)):
+    """Retrieve Signal E2EE public key bundle for a given user from DB."""
+    from app.models.user import User
+    from app.models.signed_prekey import SignedPreKey
+    from app.models.one_time_prekey import OneTimePreKey
+
+    user = db.get(User, user_id)
+    if not user or not user.identity_public_key:
         raise HTTPException(status_code=404, detail="Key bundle not found for this user")
-    return bundle
+
+    spk = db.execute(
+        select(SignedPreKey).where(SignedPreKey.user_id == user_id)
+    ).scalar_one_or_none()
+    if not spk:
+        raise HTTPException(status_code=404, detail="Key bundle not found for this user")
+
+    # Pop one one-time pre-key (consumed on use — X3DH)
+    otk = db.execute(
+        select(OneTimePreKey).where(OneTimePreKey.user_id == user_id).limit(1)
+    ).scalar_one_or_none()
+    one_time_prekeys = []
+    if otk:
+        one_time_prekeys = [{"keyId": otk.key_id, "publicKey": otk.public_key}]
+        db.delete(otk)
+        db.commit()
+
+    return {
+        "identity_key": user.identity_public_key,
+        "signed_prekey": {
+            "keyId": spk.key_id,
+            "publicKey": spk.public_key,
+            "signature": spk.signature,
+        },
+        "one_time_prekeys": one_time_prekeys,
+    }
+
 
 
 @router.post("/upload_image")
