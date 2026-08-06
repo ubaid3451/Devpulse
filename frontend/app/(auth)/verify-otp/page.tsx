@@ -74,6 +74,8 @@ function VerifyOTPContent() {
       setIsVerifying(true);
       try {
         await apiPost<AuthResponse>("/auth/verify-otp", { email, code });
+        // Set same-domain session marker so middleware allows access to /feed
+        document.cookie = `devpulse_session=1; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
         // The backend has now set the auth cookie, but AuthContext's `user`
         // state doesn't know that yet — it was only populated once, on
         // initial app load. Without this call, /feed would render with

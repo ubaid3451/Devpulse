@@ -112,6 +112,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       password,
     });
 
+    // Store session marker so Next.js middleware can detect auth state
+    // (cross-domain backend httpOnly cookies are not visible to middleware)
+    document.cookie = `devpulse_session=1; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
+
     dispatch({ type: "SET_USER", user: res.user });
 
     return res.user;
@@ -130,6 +134,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     await apiPost("/auth/logout");
+    localStorage.removeItem("devpulse_access_token");
+    document.cookie = "devpulse_session=; path=/; max-age=0";
     dispatch({ type: "CLEAR_USER" });
   }, []);
 
