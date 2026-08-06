@@ -107,7 +107,13 @@ app.add_middleware(
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
 from starlette.middleware.sessions import SessionMiddleware
-app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.secret_key,
+    https_only=settings.is_production,  # Secure flag on HTTPS
+    same_site="lax",
+    max_age=600,  # 10 minutes — enough for OAuth round-trip
+)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(auth_router.router)
