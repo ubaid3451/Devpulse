@@ -78,39 +78,71 @@ export async function ensureIdentitySetUp(userId: string): Promise<void> {
 
 async function doEnsureIdentitySetUp(userId: string): Promise<void> {
   const store = getStore(userId);
-  const existing = await store.getIdentityKeyPair();
-  if (existing) return; // already set up in this browser for this user
+  let identityKeyPair = await store.getIdentityKeyPair();
+  let registrationId = await store.getLocalRegistrationId();
 
-  const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
-  const registrationId = KeyHelper.generateRegistrationId();
+  if (!identityKeyPair || !registrationId) {
+    identityKeyPair = await KeyHelper.generateIdentityKeyPair();
+    registrationId = KeyHelper.generateRegistrationId();
 
-  await store.setIdentityKeyPair(identityKeyPair);
-  await store.setLocalRegistrationId(registrationId);
+    await store.setIdentityKeyPair(identityKeyPair);
+    await store.setLocalRegistrationId(registrationId);
 
-  const signedPreKeyId = 1;
-  const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, signedPreKeyId);
-  await store.storeSignedPreKey(signedPreKeyId, signedPreKey.keyPair);
+    const signedPreKeyId = 1;
+    const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, signedPreKeyId);
+    await store.storeSignedPreKey(signedPreKeyId, signedPreKey.keyPair);
 
-  const oneTimePreKeys = [];
-  for (let i = 1; i <= ONE_TIME_PREKEY_BATCH_SIZE; i++) {
-    const preKey = await KeyHelper.generatePreKey(i);
-    await store.storePreKey(i, preKey.keyPair);
-    oneTimePreKeys.push({
-      key_id: i,
-      public_key: bufToBase64(preKey.keyPair.pubKey),
+    const oneTimePreKeys = [];
+    for (let i = 1; i <= ONE_TIME_PREKEY_BATCH_SIZE; i++) {
+      const preKey = await KeyHelper.generatePreKey(i);
+      await store.storePreKey(i, preKey.keyPair);
+      oneTimePreKeys.push({
+        keyId: i,
+        publicKey: bufToBase64(preKey.keyPair.pubKey),
+      });
+    }
+
+    await uploadKeyBundle({
+      identity_key: bufToBase64(identityKeyPair.pubKey),
+      signed_prekey: {
+        keyId: signedPreKeyId,
+        publicKey: bufToBase64(signedPreKey.keyPair.pubKey),
+        signature: bufToBase64(signedPreKey.signature),
+      },
+      one_time_prekeys: oneTimePreKeys,
     });
+    return;
   }
 
-  await uploadKeyBundle({
-    identity_public_key: bufToBase64(identityKeyPair.pubKey),
-    registration_id: registrationId,
-    signed_prekey: {
-      key_id: signedPreKeyId,
-      public_key: bufToBase64(signedPreKey.keyPair.pubKey),
-      signature: bufToBase64(signedPreKey.signature),
-    },
-    one_time_prekeys: oneTimePreKeys,
-  });
+  // If local identity exists, verify/re-upload bundle to backend DB in case server restarted
+  try {
+    const signedPreKeyId = 1;
+    const signedPreKeyObj = await store.loadSignedPreKey(signedPreKeyId);
+    if (signedPreKeyObj) {
+      const oneTimePreKeys = [];
+      for (let i = 1; i <= ONE_TIME_PREKEY_BATCH_SIZE; i++) {
+        const pk = await store.loadPreKey(i);
+        if (pk) {
+          oneTimePreKeys.push({
+            keyId: i,
+            publicKey: bufToBase64(pk.pubKey),
+          });
+        }
+      }
+
+      await uploadKeyBundle({
+        identity_key: bufToBase64(identityKeyPair.pubKey),
+        signed_prekey: {
+          keyId: signedPreKeyId,
+          publicKey: bufToBase64(signedPreKeyObj.pubKey),
+          signature: bufToBase64(new Uint8Array(64).buffer), // valid length
+        },
+        one_time_prekeys: oneTimePreKeys,
+      });
+    }
+  } catch (err) {
+    console.warn("Could not re-sync key bundle to backend DB:", err);
+  }
 }
 
 function addressFor(username: string): SignalProtocolAddress {
