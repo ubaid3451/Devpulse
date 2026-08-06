@@ -71,17 +71,17 @@ def _set_auth_cookies(response: Response, user_id: str, role: str) -> None:
         value=access_token,
         max_age=settings.access_token_expire_minutes * 60,
         httponly=True,
-        samesite="lax",
         secure=settings.is_production,
-    )
+        samesite="none",
+)
     response.set_cookie(
         key=REFRESH_COOKIE,
         value=refresh_token,
         max_age=settings.refresh_token_expire_days * 86400,
         httponly=True,
-        samesite="lax",
         secure=settings.is_production,
-    )
+        samesite="none",
+)
 
 
 @router.post(
