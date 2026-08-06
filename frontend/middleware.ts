@@ -2,9 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 
 const PROTECTED_PATHS = ["/feed", "/profile", "/chat", "/admin"];
 const AUTH_PATHS = ["/login", "/register", "/verify-otp"];
+const PUBLIC_PATHS = ["/oauth-success"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Always allow OAuth success page through (sets session cookie)
+  if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+    return NextResponse.next();
+  }
+
   // Check our same-domain session cookie (cross-domain backend cookies
   // are not visible to Next.js middleware)
   const session = request.cookies.get("devpulse_session")?.value

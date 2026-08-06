@@ -281,7 +281,7 @@ async def auth_google(request: Request, db: Session = Depends(get_db)):
     
     user = auth_service.authenticate_oauth_user(email, full_name, "google", provider_id, db)
     
-    response = RedirectResponse(url=f"{settings.frontend_url}/feed")
+    response = RedirectResponse(url=f"{settings.frontend_url}/oauth-success")
     _set_auth_cookies(response, user.id, user.role)
     return response
 
@@ -325,6 +325,6 @@ async def auth_github(request: Request, db: Session = Depends(get_db)):
     
     user = auth_service.authenticate_oauth_user(email, full_name, "github", provider_id, db)
     
-    response = RedirectResponse(url=f"{settings.frontend_url}/feed")
+    response = RedirectResponse(url=f"{settings.frontend_url}/oauth-success")
     _set_auth_cookies(response, user.id, user.role)
     return response
