@@ -31,7 +31,12 @@ function bufToBase64(buf: ArrayBuffer | undefined): string {
 }
 
 function base64ToBuf(base64: string): ArrayBuffer {
-  const binary = atob(base64);
+  if (!base64) return new ArrayBuffer(0);
+  let normalized = base64.replace(/-/g, "+").replace(/_/g, "/").trim();
+  while (normalized.length % 4 !== 0) {
+    normalized += "=";
+  }
+  const binary = atob(normalized);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes.buffer;
@@ -117,29 +122,28 @@ async function doEnsureIdentitySetUp(userId: string): Promise<void> {
   // If local identity exists, verify/re-upload bundle to backend DB in case server restarted
   try {
     const signedPreKeyId = 1;
-    const signedPreKeyObj = await store.loadSignedPreKey(signedPreKeyId);
-    if (signedPreKeyObj) {
-      const oneTimePreKeys = [];
-      for (let i = 1; i <= ONE_TIME_PREKEY_BATCH_SIZE; i++) {
-        const pk = await store.loadPreKey(i);
-        if (pk) {
-          oneTimePreKeys.push({
-            keyId: i,
-            publicKey: bufToBase64(pk.pubKey),
-          });
-        }
-      }
+    const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, signedPreKeyId);
+    await store.storeSignedPreKey(signedPreKeyId, signedPreKey.keyPair);
 
-      await uploadKeyBundle({
-        identity_key: bufToBase64(identityKeyPair.pubKey),
-        signed_prekey: {
-          keyId: signedPreKeyId,
-          publicKey: bufToBase64(signedPreKeyObj.pubKey),
-          signature: bufToBase64(new Uint8Array(64).buffer), // valid length
-        },
-        one_time_prekeys: oneTimePreKeys,
+    const oneTimePreKeys = [];
+    for (let i = 1; i <= ONE_TIME_PREKEY_BATCH_SIZE; i++) {
+      const preKey = await KeyHelper.generatePreKey(i);
+      await store.storePreKey(i, preKey.keyPair);
+      oneTimePreKeys.push({
+        keyId: i,
+        publicKey: bufToBase64(preKey.keyPair.pubKey),
       });
     }
+
+    await uploadKeyBundle({
+      identity_key: bufToBase64(identityKeyPair.pubKey),
+      signed_prekey: {
+        keyId: signedPreKeyId,
+        publicKey: bufToBase64(signedPreKey.keyPair.pubKey),
+        signature: bufToBase64(signedPreKey.signature),
+      },
+      one_time_prekeys: oneTimePreKeys,
+    });
   } catch (err) {
     console.warn("Could not re-sync key bundle to backend DB:", err);
   }
