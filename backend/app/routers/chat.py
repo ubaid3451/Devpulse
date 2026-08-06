@@ -72,26 +72,29 @@ def upload_key_bundle(bundle: KeyBundleUpload, current_user: CurrentUser, db: Se
     return {"message": "Key bundle uploaded successfully"}
 
 
-@router.get("/keys/{user_id}")
-def get_key_bundle(user_id: str, current_user: CurrentUser, db: Session = Depends(get_db)):
-    """Retrieve Signal E2EE public key bundle for a given user from DB."""
+@router.get("/keys/{user_id_or_username}")
+def get_key_bundle(user_id_or_username: str, current_user: CurrentUser, db: Session = Depends(get_db)):
+    """Retrieve Signal E2EE public key bundle for a given user (by user ID or username) from DB."""
     from app.models.user import User
     from app.models.signed_prekey import SignedPreKey
     from app.models.one_time_prekey import OneTimePreKey
 
-    user = db.get(User, user_id)
+    user = db.execute(
+        select(User).where(or_(User.id == user_id_or_username, User.username == user_id_or_username))
+    ).scalar_one_or_none()
+
     if not user or not user.identity_public_key:
         raise HTTPException(status_code=404, detail="Key bundle not found for this user")
 
     spk = db.execute(
-        select(SignedPreKey).where(SignedPreKey.user_id == user_id)
+        select(SignedPreKey).where(SignedPreKey.user_id == user.id)
     ).scalar_one_or_none()
     if not spk:
         raise HTTPException(status_code=404, detail="Key bundle not found for this user")
 
     # Pop one one-time pre-key (consumed on use — X3DH)
     otk = db.execute(
-        select(OneTimePreKey).where(OneTimePreKey.user_id == user_id).limit(1)
+        select(OneTimePreKey).where(OneTimePreKey.user_id == user.id).limit(1)
     ).scalar_one_or_none()
     one_time_prekeys = []
     if otk:
