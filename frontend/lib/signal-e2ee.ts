@@ -187,11 +187,16 @@ async function getKeyBundleWithRetry(username: string) {
 }
 
 /** Builds a session with `username` via X3DH if one doesn't already exist. */
-async function ensureSessionWith(myUserId: string, username: string): Promise<void> {
+async function ensureSessionWith(myUserId: string, username: string, forceRefresh = false): Promise<void> {
   const store = getStore(myUserId);
   const address = addressFor(username);
-  const existingSession = await store.loadSession(address.toString());
-  if (existingSession) return;
+
+  if (forceRefresh) {
+    await store.removeSession(address.toString());
+  } else {
+    const existingSession = await store.loadSession(address.toString());
+    if (existingSession) return;
+  }
 
   const bundle = await getKeyBundleWithRetry(username);
 
@@ -222,23 +227,43 @@ export interface SignalEnvelope {
 
 /** Encrypts plaintext to send to `username`, establishing a session first if needed. */
 export async function encryptForUser(myUserId: string, username: string, plaintext: string): Promise<SignalEnvelope> {
-  await ensureSessionWith(myUserId, username);
-
   const store = getStore(myUserId);
   const address = addressFor(username);
-  const cipher = new SessionCipher(store as any, address);
 
-  const encoded = new TextEncoder().encode(plaintext).buffer;
-  const ciphertext = await cipher.encrypt(encoded);
+  try {
+    await ensureSessionWith(myUserId, username);
+    const cipher = new SessionCipher(store as any, address);
+    const encoded = new TextEncoder().encode(plaintext).buffer;
+    const ciphertext = await cipher.encrypt(encoded);
 
-  return {
-    content: bufToBase64(
-      typeof ciphertext.body === "string"
-        ? Uint8Array.from(ciphertext.body, (c) => c.charCodeAt(0)).buffer
-        : ciphertext.body
-    ),
-    msg_type: ciphertext.type,
-  };
+    return {
+      content: bufToBase64(
+        typeof ciphertext.body === "string"
+          ? Uint8Array.from(ciphertext.body, (c) => c.charCodeAt(0)).buffer
+          : ciphertext.body
+      ),
+      msg_type: ciphertext.type,
+    };
+  } catch (err: any) {
+    // If the existing session is stale/corrupt (e.g. invalid signature from old key),
+    // delete local session state, force re-fetching latest bundle, and retry once.
+    console.warn(`Signal encryption failed for ${username}, resetting session & retrying...`, err);
+    await store.removeSession(address.toString());
+    await ensureSessionWith(myUserId, username, true);
+
+    const cipher = new SessionCipher(store as any, address);
+    const encoded = new TextEncoder().encode(plaintext).buffer;
+    const ciphertext = await cipher.encrypt(encoded);
+
+    return {
+      content: bufToBase64(
+        typeof ciphertext.body === "string"
+          ? Uint8Array.from(ciphertext.body, (c) => c.charCodeAt(0)).buffer
+          : ciphertext.body
+      ),
+      msg_type: ciphertext.type,
+    };
+  }
 }
 
 /** Decrypts a message from/to `username`. Handles both the first (PreKey) message and subsequent ones. */
