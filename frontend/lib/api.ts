@@ -402,8 +402,8 @@ export async function getBlockedUsers(): Promise<BlockedUser[]> {
   return apiGet<BlockedUser[]>("/users/blocked");
 }
 
-export async function toggleBlock(userId: string): Promise<{ is_blocked: boolean }> {
-  return apiPost<{ is_blocked: boolean }>(`/users/block/${userId}`);
+export async function toggleBlock(username: string): Promise<{ is_blocked: boolean }> {
+  return apiPost<{ is_blocked: boolean }>(`/users/${username}/block`);
 }
 
 export async function getFollowRequests(): Promise<FollowRequestResponse[]> {
