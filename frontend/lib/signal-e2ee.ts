@@ -263,22 +263,11 @@ export async function decryptFromUser(myUserId: string, username: string, envelo
 
     return new TextDecoder().decode(plaintextBuf);
   } catch (err: any) {
-    // If session is stale/corrupt (Bad MAC, invalid key, etc.), reset and retry once
-    console.warn(`Signal decryption failed for ${username}, resetting session & retrying...`, err);
+    // If decryption fails (e.g., Bad MAC due to desynced session or cleared site storage),
+    // purge the stale local session so that the NEXT new message automatically re-establishes
+    // a clean fresh X3DH session.
+    console.warn(`Signal decryption failed for message from ${username} (${err?.message || err}). Purging stale session for future messages.`);
     await store.removeSession(address.toString());
-    await ensureSessionWith(myUserId, username, true);
-
-    const cipher = new SessionCipher(store as any, address);
-    const bodyBuf = base64ToBuf(envelope.content);
-    const bodyBinaryString = Array.from(new Uint8Array(bodyBuf), (b) => String.fromCharCode(b)).join("");
-
-    let plaintextBuf: ArrayBuffer;
-    if (envelope.msg_type === 3) {
-      plaintextBuf = await cipher.decryptPreKeyWhisperMessage(bodyBinaryString, "binary");
-    } else {
-      plaintextBuf = await cipher.decryptWhisperMessage(bodyBinaryString, "binary");
-    }
-
-    return new TextDecoder().decode(plaintextBuf);
+    return "[Unable to decrypt message]";
   }
 }
