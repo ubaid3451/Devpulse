@@ -247,17 +247,38 @@ export async function encryptForUser(myUserId: string, username: string, plainte
 export async function decryptFromUser(myUserId: string, username: string, envelope: SignalEnvelope): Promise<string> {
   const store = getStore(myUserId);
   const address = addressFor(username);
-  const cipher = new SessionCipher(store as any, address);
 
-  const bodyBuf = base64ToBuf(envelope.content);
-  const bodyBinaryString = Array.from(new Uint8Array(bodyBuf), (b) => String.fromCharCode(b)).join("");
+  try {
+    const cipher = new SessionCipher(store as any, address);
 
-  let plaintextBuf: ArrayBuffer;
-  if (envelope.msg_type === 3) {
-    plaintextBuf = await cipher.decryptPreKeyWhisperMessage(bodyBinaryString, "binary");
-  } else {
-    plaintextBuf = await cipher.decryptWhisperMessage(bodyBinaryString, "binary");
+    const bodyBuf = base64ToBuf(envelope.content);
+    const bodyBinaryString = Array.from(new Uint8Array(bodyBuf), (b) => String.fromCharCode(b)).join("");
+
+    let plaintextBuf: ArrayBuffer;
+    if (envelope.msg_type === 3) {
+      plaintextBuf = await cipher.decryptPreKeyWhisperMessage(bodyBinaryString, "binary");
+    } else {
+      plaintextBuf = await cipher.decryptWhisperMessage(bodyBinaryString, "binary");
+    }
+
+    return new TextDecoder().decode(plaintextBuf);
+  } catch (err: any) {
+    // If session is stale/corrupt (Bad MAC, invalid key, etc.), reset and retry once
+    console.warn(`Signal decryption failed for ${username}, resetting session & retrying...`, err);
+    await store.removeSession(address.toString());
+    await ensureSessionWith(myUserId, username, true);
+
+    const cipher = new SessionCipher(store as any, address);
+    const bodyBuf = base64ToBuf(envelope.content);
+    const bodyBinaryString = Array.from(new Uint8Array(bodyBuf), (b) => String.fromCharCode(b)).join("");
+
+    let plaintextBuf: ArrayBuffer;
+    if (envelope.msg_type === 3) {
+      plaintextBuf = await cipher.decryptPreKeyWhisperMessage(bodyBinaryString, "binary");
+    } else {
+      plaintextBuf = await cipher.decryptWhisperMessage(bodyBinaryString, "binary");
+    }
+
+    return new TextDecoder().decode(plaintextBuf);
   }
-
-  return new TextDecoder().decode(plaintextBuf);
 }
