@@ -411,11 +411,11 @@ export async function getFollowRequests(): Promise<FollowRequestResponse[]> {
 }
 
 export async function acceptFollowRequest(requestId: string): Promise<{ message: string }> {
-  return apiPost<{ message: string }>(`/users/me/follow-requests/${requestId}/accept`);
+  return apiPost<{ message: string }>(`/users/follow-requests/${requestId}/accept`);
 }
 
 export async function rejectFollowRequest(requestId: string): Promise<{ message: string }> {
-  return apiPost<{ message: string }>(`/users/me/follow-requests/${requestId}/reject`);
+  return apiPost<{ message: string }>(`/users/follow-requests/${requestId}/reject`);
 }
 
 // ── Posts API Functions ───────────────────────────────────────────────────────
