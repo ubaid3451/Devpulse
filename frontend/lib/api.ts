@@ -399,7 +399,7 @@ export async function toggleFollow(username: string): Promise<ToggleFollowStatus
 }
 
 export async function getBlockedUsers(): Promise<BlockedUser[]> {
-  return apiGet<BlockedUser[]>("/users/blocked");
+  return apiGet<BlockedUser[]>("/users/me/blocked");
 }
 
 export async function toggleBlock(username: string): Promise<{ is_blocked: boolean }> {
