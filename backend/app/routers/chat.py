@@ -96,20 +96,24 @@ def get_key_bundle(user_id_or_username: str, current_user: CurrentUser, db: Sess
     otk = db.execute(
         select(OneTimePreKey).where(OneTimePreKey.user_id == user.id).limit(1)
     ).scalar_one_or_none()
-    one_time_prekeys = []
+    one_time_prekey = None
     if otk:
-        one_time_prekeys = [{"keyId": otk.key_id, "publicKey": otk.public_key}]
+        one_time_prekey = {
+            "key_id": otk.key_id,
+            "public_key": otk.public_key,
+        }
         db.delete(otk)
         db.commit()
 
     return {
         "identity_key": user.identity_public_key,
+        "registration_id": user.registration_id,
         "signed_prekey": {
-            "keyId": spk.key_id,
-            "publicKey": spk.public_key,
+            "key_id": spk.key_id,
+            "public_key": spk.public_key,
             "signature": spk.signature,
         },
-        "one_time_prekeys": one_time_prekeys,
+        "one_time_prekey": one_time_prekey,
     }
 
 

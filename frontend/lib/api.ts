@@ -407,15 +407,15 @@ export async function toggleBlock(userId: string): Promise<{ is_blocked: boolean
 }
 
 export async function getFollowRequests(): Promise<FollowRequestResponse[]> {
-  return apiGet<FollowRequestResponse[]>("/users/follow-requests");
+  return apiGet<FollowRequestResponse[]>("/users/me/follow-requests");
 }
 
 export async function acceptFollowRequest(requestId: string): Promise<{ message: string }> {
-  return apiPost<{ message: string }>(`/users/follow-requests/${requestId}/accept`);
+  return apiPost<{ message: string }>(`/users/me/follow-requests/${requestId}/accept`);
 }
 
 export async function rejectFollowRequest(requestId: string): Promise<{ message: string }> {
-  return apiPost<{ message: string }>(`/users/follow-requests/${requestId}/reject`);
+  return apiPost<{ message: string }>(`/users/me/follow-requests/${requestId}/reject`);
 }
 
 // ── Posts API Functions ───────────────────────────────────────────────────────
