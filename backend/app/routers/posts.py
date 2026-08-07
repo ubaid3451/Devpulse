@@ -153,7 +153,7 @@ def create_post(
         filepath = os.path.join(uploads_dir, filename)
         with open(filepath, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
-        image_url = f"{settings.backend_url}/uploads/{filename}"
+        image_url = f"{settings.public_backend_url}/uploads/{filename}"
 
     post = Post(
         title=title,

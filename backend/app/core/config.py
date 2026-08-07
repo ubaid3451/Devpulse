@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.environment == "production"
 
+    @property
+    def public_backend_url(self) -> str:
+        if self.backend_url and "localhost" not in self.backend_url:
+            return self.backend_url.rstrip("/")
+        if self.is_production:
+            return "https://13.126.205.138.nip.io"
+        return self.backend_url.rstrip("/")
+
     # ── Google OAuth ──────────────────────────────────────────────────────────
     google_client_id: str = ""
     google_client_secret: str = ""

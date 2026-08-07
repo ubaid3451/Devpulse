@@ -29,4 +29,4 @@ def save_chat_image(image: UploadFile) -> str:
         shutil.copyfileobj(image.file, buffer)
 
     settings = get_settings()
-    return f"{settings.backend_url}/uploads/{filename}"
+    return f"{settings.public_backend_url}/uploads/{filename}"
