@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.core.config import get_settings
 from app.models.post import Post, Comment, Like
 from app.models.user import User
 from app.models.follow import Follow
@@ -17,6 +18,8 @@ from app.schemas.post import (
 )
 
 router = APIRouter(prefix="/posts", tags=["posts"])
+
+settings = get_settings()
 
 
 def _post_to_dict(post: Post, current_user_id: str) -> dict:
@@ -150,7 +153,7 @@ def create_post(
         filepath = os.path.join(uploads_dir, filename)
         with open(filepath, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
-        image_url = f"http://localhost:8000/uploads/{filename}"
+        image_url = f"{settings.backend_url}/uploads/{filename}"
 
     post = Post(
         title=title,

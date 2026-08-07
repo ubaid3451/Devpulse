@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     # ── CORS ──────────────────────────────────────────────────────────────────
     frontend_url: str = "http://localhost:3000"
+    backend_url: str = "http://localhost:8000"
 
     # ── Environment ───────────────────────────────────────────────────────────
     environment: str = "development"

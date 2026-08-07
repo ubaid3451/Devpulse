@@ -32,6 +32,7 @@ services:
       DATABASE_URL: postgresql://devpulse:devpulse_password@db:5432/devpulse
       SECRET_KEY: ${SECRET_KEY}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:8000}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}

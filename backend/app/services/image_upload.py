@@ -8,6 +8,8 @@ import uuid
 
 from fastapi import UploadFile
 
+from app.core.config import get_settings
+
 
 def save_chat_image(image: UploadFile) -> str:
     """Validates and saves an uploaded chat image, returns its public URL."""
@@ -26,4 +28,5 @@ def save_chat_image(image: UploadFile) -> str:
     with open(filepath, "wb") as buffer:
         shutil.copyfileobj(image.file, buffer)
 
-    return f"http://localhost:8000/uploads/{filename}"
+    settings = get_settings()
+    return f"{settings.backend_url}/uploads/{filename}"
