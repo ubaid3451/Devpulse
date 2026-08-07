@@ -84,13 +84,16 @@ export async function ensureIdentitySetUp(userId: string): Promise<void> {
 async function doEnsureIdentitySetUp(userId: string): Promise<void> {
   const store = getStore(userId);
 
-  // Always generate a fresh identity keypair and signed prekey so signature verification
-  // is 100% valid and overwrites any corrupted legacy DB records.
-  const identityKeyPair = await KeyHelper.generateIdentityKeyPair();
-  const registrationId = KeyHelper.generateRegistrationId();
+  let identityKeyPair = await store.getIdentityKeyPair();
+  let registrationId = await store.getLocalRegistrationId();
 
-  await store.setIdentityKeyPair(identityKeyPair);
-  await store.setLocalRegistrationId(registrationId);
+  if (!identityKeyPair || !registrationId) {
+    identityKeyPair = await KeyHelper.generateIdentityKeyPair();
+    registrationId = KeyHelper.generateRegistrationId();
+
+    await store.setIdentityKeyPair(identityKeyPair);
+    await store.setLocalRegistrationId(registrationId);
+  }
 
   const signedPreKeyId = 1;
   const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, signedPreKeyId);
