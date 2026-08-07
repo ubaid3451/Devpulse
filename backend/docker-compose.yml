@@ -6,14 +6,14 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: devpulse
-      POSTGRES_PASSWORD: devpulse_password   # change this — see note below
+      POSTGRES_PASSWORD: devpulse_password # change this — see note below
       POSTGRES_DB: devpulse
     ports:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U devpulse"]
+      test: [ "CMD-SHELL", "pg_isready -U devpulse" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -56,7 +56,7 @@ services:
       # show up without rebuilding the image — useful for active development.
       # Remove this volume for a production-style build.
       - .:/app
-      - /app/.venv  # prevents the host's (absent) venv from shadowing the container's installed packages
+      - /app/.venv # prevents the host's (absent) venv from shadowing the container's installed packages
 
 volumes:
   postgres_data:
