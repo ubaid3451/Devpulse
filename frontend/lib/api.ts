@@ -395,7 +395,7 @@ export async function getExploreUsers(skip = 0, limit = 20): Promise<ExploreUser
 }
 
 export async function toggleFollow(username: string): Promise<ToggleFollowStatus> {
-  return apiPost<ToggleFollowStatus>(`/users/follow/${username}`);
+  return apiPost<ToggleFollowStatus>(`/users/${username}/follow`);
 }
 
 export async function getBlockedUsers(): Promise<BlockedUser[]> {
