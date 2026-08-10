@@ -51,7 +51,13 @@ interface MessagesReadEvent {
   read_by: string;
 }
 
-type IncomingEvent = PresenceEvent | ChatMessageEvent | ReactionUpdateEvent | MessagesReadEvent;
+interface SessionResetEvent {
+  type: "session_reset";
+  conversation_id: string;
+  from_user_id: string;
+}
+
+type IncomingEvent = PresenceEvent | ChatMessageEvent | ReactionUpdateEvent | MessagesReadEvent | SessionResetEvent;
 
 interface ChatSocketContextValue {
   isConnected: boolean;
@@ -66,6 +72,7 @@ interface ChatSocketContextValue {
   onChatMessage: (handler: (msg: ChatMessageResponse) => void) => () => void;
   onReactionUpdate: (handler: (msg: ReactionUpdateEvent) => void) => () => void;
   onMessagesRead: (handler: (event: MessagesReadEvent) => void) => () => void;
+  onSessionReset: (handler: (event: SessionResetEvent) => void) => () => void;
 }
 
 const ChatSocketContext = createContext<ChatSocketContextValue | null>(null);
@@ -84,6 +91,7 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
   const chatMessageHandlers = useRef(new Set<(msg: ChatMessageResponse) => void>());
   const reactionHandlers = useRef(new Set<(msg: ReactionUpdateEvent) => void>());
   const messagesReadHandlers = useRef(new Set<(event: MessagesReadEvent) => void>());
+  const sessionResetHandlers = useRef(new Set<(event: SessionResetEvent) => void>());
 
   const connect = useCallback(() => {
     if (!user) return;
@@ -137,6 +145,8 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
         reactionHandlers.current.forEach((h) => h(data));
       } else if (data.type === "messages_read") {
         messagesReadHandlers.current.forEach((h) => h(data));
+      } else if (data.type === "session_reset") {
+        sessionResetHandlers.current.forEach((h) => h(data));
       }
     };
 
@@ -206,6 +216,13 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
     };
   }, []);
 
+  const onSessionReset = useCallback((handler: (event: SessionResetEvent) => void) => {
+    sessionResetHandlers.current.add(handler);
+    return () => {
+      sessionResetHandlers.current.delete(handler);
+    };
+  }, []);
+
   return (
     <ChatSocketContext.Provider
       value={{
@@ -216,6 +233,7 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
         onChatMessage,
         onReactionUpdate,
         onMessagesRead,
+        onSessionReset,
       }}
     >
       {children}

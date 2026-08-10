@@ -29,9 +29,9 @@ function ChatPageContent() {
   const searchParams = useSearchParams();
   const initialUsername = searchParams.get("user"); // optional: ?user=someusername
   const { user: currentUser } = useAuth();
-  const { onlineUsers, sendMessage, sendReaction, onChatMessage, onReactionUpdate, onMessagesRead } =
+  const { onlineUsers, sendMessage, sendReaction, onChatMessage, onReactionUpdate, onMessagesRead, onSessionReset } =
     useChatSocket();
-  const { isReady: e2eeReady, encryptFor, decryptFrom } = useE2EE();
+  const { isReady: e2eeReady, encryptFor, decryptFrom, forceSessionReset } = useE2EE();
 
   const [conversations, setConversations] = useState<ConversationResponse[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -173,29 +173,38 @@ function ChatPageContent() {
           setMessages(history);
           return;
         }
-        const decrypted = await Promise.all(
-          history.map(async (msg) => {
-            if (!msg.msg_type) return msg;
+        // BUG FIX: Decrypt history SEQUENTIALLY, not concurrently via Promise.all.
+        // The Double Ratchet is stateful — each decrypt advances the ratchet and
+        // writes new state to IndexedDB. Concurrent decrypts race each other on those
+        // reads/writes, advancing the ratchet out-of-order and causing Bad MAC on
+        // every message that doesn't win the race.
+        const decrypted: typeof history = [];
+        for (const msg of history) {
+          if (!msg.msg_type) {
+            decrypted.push(msg);
+            continue;
+          }
 
-            const cached = currentUser ? getCachedMessagePlaintext(currentUser.id, msg.id) : undefined;
-            if (cached !== undefined) {
-              return { ...msg, content: cached };
-            }
+          const cached = currentUser ? getCachedMessagePlaintext(currentUser.id, msg.id) : undefined;
+          if (cached !== undefined) {
+            decrypted.push({ ...msg, content: cached });
+            continue;
+          }
 
-            if (msg.sender_id === currentUser?.id) {
-              return { ...msg, content: "[Sent message — not available on this device]" };
-            }
+          if (msg.sender_id === currentUser?.id) {
+            decrypted.push({ ...msg, content: "[Sent message — not available on this device]" });
+            continue;
+          }
 
-            try {
-              const plaintext = await decryptFrom(otherUsername, { content: msg.content || "", msg_type: Number(msg.msg_type) }, activeConversationId);
-              if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
-              return { ...msg, content: plaintext };
-            } catch (err) {
-              console.error("Failed to decrypt message", msg.id, err);
-              return { ...msg, content: "[Unable to decrypt message]" };
-            }
-          })
-        );
+          try {
+            const plaintext = await decryptFrom(otherUsername, { content: msg.content || "", msg_type: Number(msg.msg_type) }, activeConversationId);
+            if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
+            decrypted.push({ ...msg, content: plaintext });
+          } catch (err) {
+            console.error("Failed to decrypt message", msg.id, err);
+            decrypted.push({ ...msg, content: "[Unable to decrypt message]" });
+          }
+        }
         setMessages(decrypted);
       })
       .catch((err) => console.error("Failed to load history", err));
@@ -327,6 +336,25 @@ function ChatPageContent() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onChatMessage, onReactionUpdate, e2eeReady, decryptFrom, currentUser?.id]);
+
+  // BUG FIX: Subscribe to session_reset events from the other party.
+  // When the other side's decryption fails (Bad MAC), they send a session_reset
+  // notification via the backend. We receive it here and purge OUR session too
+  // so that the next encrypt call triggers a fresh X3DH handshake — both sides
+  // re-establish together instead of only one side resetting.
+  useEffect(() => {
+    const unsub = onSessionReset((event) => {
+      const convo = conversationsRef.current.find((c) => c.conversation_id === event.conversation_id);
+      const otherUsername = convo && !convo.is_group ? convo.participants[0]?.username : undefined;
+      if (!otherUsername) return;
+      console.info("[Signal:INFO] session_reset_received_from_peer", { conversationId: event.conversation_id, otherUsername });
+      forceSessionReset(otherUsername).catch((err) =>
+        console.error("[Signal:ERROR] session_reset_local_purge_failed", { otherUsername, error: String(err) })
+      );
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onSessionReset, forceSessionReset]);
 
   const selectSearchResultUser = async (user: AuthorResponse) => {
     setSearchQuery("");

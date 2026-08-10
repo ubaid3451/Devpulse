@@ -241,6 +241,37 @@ async def mark_conversation_read(
     return {"marked_read": len(updated_message_ids)}
 
 
+@router.post("/{conversation_id}/session-reset")
+async def session_reset_notify(
+    conversation_id: str,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+):
+    """
+    Notify the other participant(s) in a conversation to reset their Signal
+    Protocol session state. Called when decryption fails (Bad MAC) so that
+    BOTH parties purge the stale session and automatically re-establish a
+    fresh X3DH handshake on the next message — rather than only the recipient
+    resetting while the sender keeps encrypting with the now-invalid session.
+    """
+    other_participant_ids = db.execute(
+        select(ConversationParticipant.user_id).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.user_id != current_user.id,
+        )
+    ).scalars().all()
+
+    payload = {
+        "type": "session_reset",
+        "conversation_id": conversation_id,
+        "from_user_id": current_user.id,
+    }
+    for participant_id in other_participant_ids:
+        await manager.send_personal_message(payload, participant_id)
+
+    return {"message": "Session reset notification sent"}
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
     token = websocket.cookies.get("access_token") or websocket.query_params.get("token")

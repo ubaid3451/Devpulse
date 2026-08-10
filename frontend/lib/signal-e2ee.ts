@@ -158,7 +158,9 @@ async function doEnsureIdentitySetUp(userId: string): Promise<void> {
   let identityKeyPair = await store.getIdentityKeyPair();
   let registrationId = await store.getLocalRegistrationId();
 
-  if (!identityKeyPair || !registrationId) {
+  const isNewIdentity = !identityKeyPair || !registrationId;
+
+  if (isNewIdentity) {
     logEntry("info", "identity_generating_new", { userId });
     identityKeyPair = await KeyHelper.generateIdentityKeyPair();
     registrationId = KeyHelper.generateRegistrationId();
@@ -167,7 +169,15 @@ async function doEnsureIdentitySetUp(userId: string): Promise<void> {
     await store.setLocalRegistrationId(registrationId);
     logEntry("info", "identity_stored", { userId });
   } else {
-    logEntry("info", "identity_already_exists", { userId });
+    // BUG FIX: Only skip key upload if signed prekey already stored locally.
+    // Previously, this block fell through and re-generated+uploaded signed prekeys
+    // on EVERY login, invalidating all existing sessions for every peer.
+    const existingSignedPreKey = await store.loadSignedPreKey(1);
+    if (existingSignedPreKey) {
+      logEntry("info", "identity_already_exists_skipping_upload", { userId });
+      return;
+    }
+    logEntry("info", "identity_exists_but_prekeys_missing_reuploading", { userId });
   }
 
   const signedPreKeyId = 1;
@@ -291,44 +301,51 @@ export async function encryptForUser(myUserId: string, username: string, plainte
   const store = getStore(myUserId);
   const address = addressFor(username);
 
-  return withSessionLock(myUserId, username, async () => {
-    try {
-      await ensureSessionWith(myUserId, username);
-      const cipher = new SessionCipher(store as any, address);
-      const encoded = new TextEncoder().encode(plaintext).buffer;
-      const ciphertext = await cipher.encrypt(encoded);
+  // BUG FIX: Do NOT wrap this in withSessionLock — ensureSessionWith already
+  // acquires the per-conversation lock internally. Nesting two withSessionLock
+  // calls for the same key creates a deadlock: the outer lock's fn() awaits
+  // ensureSessionWith(), which in turn tries to await the outer lock's promise
+  // before creating its own — neither can ever resolve.
+  const doEncrypt = async (): Promise<SignalEnvelope> => {
+    await ensureSessionWith(myUserId, username);
+    const cipher = new SessionCipher(store as any, address);
+    const encoded = new TextEncoder().encode(plaintext).buffer;
+    const ciphertext = await cipher.encrypt(encoded);
 
-      logEntry("debug", "encrypt", { username, msgType: ciphertext.type });
+    logEntry("debug", "encrypt", { username, msgType: ciphertext.type });
 
-      return {
-        content: bufToBase64(
-          typeof ciphertext.body === "string"
-            ? Uint8Array.from(ciphertext.body, (c) => c.charCodeAt(0)).buffer
-            : ciphertext.body
-        ),
-        msg_type: ciphertext.type,
-      };
-    } catch (err: any) {
-      // If the existing session is stale/corrupt (e.g. invalid signature from old key),
-      // delete local session state, force re-fetching latest bundle, and retry once.
-      logEntry("warn", "encrypt_failed_retrying", { username, error: err?.message });
-      await store.removeSession(address.toString());
-      await ensureSessionWith(myUserId, username, true);
+    return {
+      content: bufToBase64(
+        typeof ciphertext.body === "string"
+          ? Uint8Array.from(ciphertext.body, (c) => c.charCodeAt(0)).buffer
+          : ciphertext.body
+      ),
+      msg_type: ciphertext.type,
+    };
+  };
 
-      const cipher = new SessionCipher(store as any, address);
-      const encoded = new TextEncoder().encode(plaintext).buffer;
-      const ciphertext = await cipher.encrypt(encoded);
+  try {
+    return await doEncrypt();
+  } catch (err: any) {
+    // If the existing session is stale/corrupt (e.g. invalid signature from old key),
+    // delete local session state, force re-fetching latest bundle, and retry once.
+    logEntry("warn", "encrypt_failed_retrying", { username, error: err?.message });
+    await store.removeSession(address.toString());
+    await ensureSessionWith(myUserId, username, true);
 
-      return {
-        content: bufToBase64(
-          typeof ciphertext.body === "string"
-            ? Uint8Array.from(ciphertext.body, (c) => c.charCodeAt(0)).buffer
-            : ciphertext.body
-        ),
-        msg_type: ciphertext.type,
-      };
-    }
-  });
+    const cipher = new SessionCipher(store as any, address);
+    const encoded = new TextEncoder().encode(plaintext).buffer;
+    const ciphertext = await cipher.encrypt(encoded);
+
+    return {
+      content: bufToBase64(
+        typeof ciphertext.body === "string"
+          ? Uint8Array.from(ciphertext.body, (c) => c.charCodeAt(0)).buffer
+          : ciphertext.body
+      ),
+      msg_type: ciphertext.type,
+    };
+  }
 }
 
 /** Decrypts a message from/to `username`. Handles both the first (PreKey) message and subsequent ones. */
