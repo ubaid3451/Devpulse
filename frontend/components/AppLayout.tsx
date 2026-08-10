@@ -42,8 +42,6 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
           DevPulse
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          <span className="material-symbols-outlined text-primary hidden sm:inline">terminal</span>
-          <span className="material-symbols-outlined text-primary hidden sm:inline">bug_report</span>
           <Link href={`/profile/${user?.username}`} title="Profile" className="w-8 h-8 rounded-full overflow-hidden bg-primary-container text-on-primary-container flex items-center justify-center font-bold border border-outline-variant uppercase hover:brightness-110 transition-all shrink-0">
             {user?.avatar_url ? (
               <img src={user.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
@@ -165,9 +163,8 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
         <CreatePostModal
           onClose={() => setIsModalOpen(false)}
           onSuccess={() => {
-            // Might need a global event or refresh, but simply closing is fine if it's not feed
             if (activeNav === "home") {
-              window.location.reload();
+              router.refresh();
             }
           }}
         />

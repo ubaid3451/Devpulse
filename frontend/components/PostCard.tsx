@@ -36,6 +36,17 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
   const [menuOpen, setMenuOpen] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
 
+  const [likesCount, setLikesCount] = React.useState(displayPost.likes_count);
+  const [isLiked, setIsLiked] = React.useState(displayPost.is_liked || false);
+  const [isReposted, setIsReposted] = React.useState(displayPost.is_reposted || false);
+
+  React.useEffect(() => {
+    const target = post.original_post || post;
+    setLikesCount(target.likes_count);
+    setIsLiked(target.is_liked || false);
+    setIsReposted(target.is_reposted || false);
+  }, [post]);
+
   const isReposter = user?.id === post.author_id;
   const isOriginalAuthor = user?.id === displayPost.author_id;
   const canManage = isReposter || isOriginalAuthor;
@@ -45,12 +56,20 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
   const handleLike = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    const newIsLiked = !isLiked;
+    const newLikesCount = newIsLiked ? likesCount + 1 : Math.max(0, likesCount - 1);
+    
+    setIsLiked(newIsLiked);
+    setLikesCount(newLikesCount);
+
     try {
-      await toggleLike(displayPost.id);
-      if (onLikeToggle) {
-        onLikeToggle();
-      }
+      const res = await toggleLike(displayPost.id);
+      setIsLiked(res.is_liked);
+      setLikesCount(res.likes_count);
     } catch (err) {
+      setIsLiked(!newIsLiked);
+      setLikesCount(likesCount);
       console.error("Failed to toggle like", err);
     }
   };
@@ -58,12 +77,17 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
   const handleRepost = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    const newIsReposted = !isReposted;
+    setIsReposted(newIsReposted);
+
     try {
       await repostPost(displayPost.id);
       if (onLikeToggle) {
         onLikeToggle();
       }
     } catch (err) {
+      setIsReposted(!newIsReposted);
       console.error("Failed to repost", err);
     }
   };
@@ -267,17 +291,17 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
             </div>
             <button
               onClick={handleRepost}
-              className={`flex items-center gap-xs transition-colors ${displayPost.is_reposted ? 'text-[#00b894]' : 'text-on-surface-variant hover:text-[#00b894]'}`}
+              className={`flex items-center gap-xs transition-colors ${isReposted ? 'text-[#00b894]' : 'text-on-surface-variant hover:text-[#00b894]'}`}
             >
               <span className="material-symbols-outlined text-[18px]">repeat</span>
               <span className="font-label-caps text-label-caps">Repost</span>
             </button>
             <button
               onClick={handleLike}
-              className={`flex items-center gap-xs transition-colors ${displayPost.is_liked ? 'text-[#ff4757]' : 'text-on-surface-variant hover:text-[#ff4757]'}`}
+              className={`flex items-center gap-xs transition-colors ${isLiked ? 'text-[#ff4757]' : 'text-on-surface-variant hover:text-[#ff4757]'}`}
             >
-              <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: displayPost.is_liked ? "'FILL' 1" : "'FILL' 0" }}>favorite</span>
-              <span className="font-label-caps text-label-caps">{displayPost.likes_count} <span className="hidden sm:inline">Like</span></span>
+              <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: isLiked ? "'FILL' 1" : "'FILL' 0" }}>favorite</span>
+              <span className="font-label-caps text-label-caps">{likesCount} <span className="hidden sm:inline">Like</span></span>
             </button>
           </div>
           <span className="px-3 py-1.5 bg-secondary-container text-on-secondary-container text-body-sm font-semibold rounded-lg hover:bg-outline-variant transition-colors shrink-0">

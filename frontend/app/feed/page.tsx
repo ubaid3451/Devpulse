@@ -66,8 +66,8 @@ export default function FeedPage() {
   const [isSearching, setIsSearching] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
-  const fetchPosts = async () => {
-    setLoadingPosts(true);
+  const fetchPosts = async (showLoading = false) => {
+    if (showLoading) setLoadingPosts(true);
     try {
       const data = await getPosts();
       // Filter out "ghost" reposts whose original post has been deleted
@@ -76,13 +76,13 @@ export default function FeedPage() {
     } catch (e) {
       console.error(e);
     } finally {
-      setLoadingPosts(false);
+      if (showLoading) setLoadingPosts(false);
     }
   };
 
   useEffect(() => {
     if (!isLoading && user) {
-      fetchPosts();
+      fetchPosts(true);
     }
   }, [isLoading, user]);
 
@@ -149,14 +149,6 @@ export default function FeedPage() {
             query={searchQuery}
             onSelect={clearSearch}
           />
-        </div>
-        <div className="flex items-center gap-md ml-auto">
-          <button className="p-2 text-on-surface-variant hover:text-primary transition-colors">
-            <span className="material-symbols-outlined">terminal</span>
-          </button>
-          <button className="p-2 text-on-surface-variant hover:text-primary transition-colors">
-            <span className="material-symbols-outlined">bug_report</span>
-          </button>
         </div>
       </div>
 
