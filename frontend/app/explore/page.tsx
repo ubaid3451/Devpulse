@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { getExploreUsers, toggleFollow, ExploreUser, ToggleFollowStatus } from "@/lib/api";
+import { getExploreUsers, toggleFollow, ExploreUser, ToggleFollowStatusType } from "@/lib/api";
 import AppLayout from "@/components/AppLayout";
 
 const PAGE_SIZE = 20;
@@ -83,7 +83,7 @@ export default function ExplorePage() {
     setProcessingUsername(user.username);
     try {
       const res = await toggleFollow(user.username);
-      const status: ToggleFollowStatus = res.status;
+      const status = res.status;
 
       setUsers((prev) =>
         prev.map((u) => {
