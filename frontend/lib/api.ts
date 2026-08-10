@@ -515,6 +515,12 @@ export async function markConversationRead(conversationId: string): Promise<{ ma
   return apiPost<{ marked_read: number }>(`/chat/${conversationId}/read`);
 }
 
+// Session reset notification — when decryption fails, we notify the other party
+// to also reset their session so both sides re-establish fresh X3DH handshakes.
+export async function notifySessionReset(conversationId: string): Promise<{ message: string }> {
+  return apiPost<{ message: string }>(`/chat/${conversationId}/session-reset`);
+}
+
 export async function uploadChatImage(fileOrFormData: File | FormData): Promise<{ image_url: string }> {
   let formData: FormData;
   if (fileOrFormData instanceof FormData) {

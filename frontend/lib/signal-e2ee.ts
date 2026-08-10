@@ -18,10 +18,48 @@ import {
   SignalProtocolAddress,
 } from "@privacyresearch/libsignal-protocol-typescript";
 import { SignalProtocolStore } from "./signal-store";
-import { uploadKeyBundle, getKeyBundle } from "./api";
+import { uploadKeyBundle, getKeyBundle, notifySessionReset } from "./api";
 
 const DEVICE_ID = 1; // single-device scope for this project
 const ONE_TIME_PREKEY_BATCH_SIZE = 20;
+
+// ── Structured logging ────────────────────────────────────────────────────
+
+type LogLevel = "debug" | "info" | "warn" | "error";
+
+interface LogEntry {
+  timestamp: string;
+  level: LogLevel;
+  event: string;
+  conversationId?: string;
+  username?: string;
+  details?: Record<string, any>;
+}
+
+function logEntry(level: LogLevel, event: string, details: LogEntry["details"] = {}): void {
+  const entry: LogEntry = {
+    timestamp: new Date().toISOString(),
+    level,
+    event,
+    ...details,
+  };
+  // In production, replace with your logging service (e.g., sentry, datadog, custom endpoint)
+  const prefix = `[Signal:${level.toUpperCase()}]`;
+  switch (level) {
+    case "debug":
+      console.debug(prefix, event, details);
+      break;
+    case "info":
+      console.info(prefix, event, details);
+      break;
+    case "warn":
+      console.warn(prefix, event, details);
+      break;
+    case "error":
+      console.error(prefix, event, details);
+      break;
+  }
+}
 
 function bufToBase64(buf: ArrayBuffer | ArrayBufferView | undefined): string {
   if (!buf) return "";
@@ -68,6 +106,31 @@ function getStore(userId: string): SignalProtocolStore {
 // generate/upload two different identities for the same user.
 const pendingSetups = new Map<string, Promise<void>>();
 
+// Per-conversation mutex for session establishment to prevent concurrent
+// X3DH handshakes from corrupting the initial session state.
+const sessionEstablishmentLocks = new Map<string, Promise<void>>();
+
+function getSessionLockKey(myUserId: string, username: string): string {
+  return `${myUserId}:${username}`;
+}
+
+async function withSessionLock<T>(
+  myUserId: string,
+  username: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const lockKey = getSessionLockKey(myUserId, username);
+  const existingLock = sessionEstablishmentLocks.get(lockKey);
+  if (existingLock) {
+    await existingLock;
+  }
+  const lockPromise = fn().finally(() => {
+    sessionEstablishmentLocks.delete(lockKey);
+  });
+  sessionEstablishmentLocks.set(lockKey, lockPromise);
+  return lockPromise;
+}
+
 /**
  * Ensures this browser has a Signal Protocol identity set up for `userId`,
  * generating one (and uploading the public bundle) if this is the first
@@ -90,15 +153,21 @@ export async function ensureIdentitySetUp(userId: string): Promise<void> {
 async function doEnsureIdentitySetUp(userId: string): Promise<void> {
   const store = getStore(userId);
 
+  logEntry("info", "identity_setup_started", { userId });
+
   let identityKeyPair = await store.getIdentityKeyPair();
   let registrationId = await store.getLocalRegistrationId();
 
   if (!identityKeyPair || !registrationId) {
+    logEntry("info", "identity_generating_new", { userId });
     identityKeyPair = await KeyHelper.generateIdentityKeyPair();
     registrationId = KeyHelper.generateRegistrationId();
 
     await store.setIdentityKeyPair(identityKeyPair);
     await store.setLocalRegistrationId(registrationId);
+    logEntry("info", "identity_stored", { userId });
+  } else {
+    logEntry("info", "identity_already_exists", { userId });
   }
 
   const signedPreKeyId = 1;
@@ -124,6 +193,7 @@ async function doEnsureIdentitySetUp(userId: string): Promise<void> {
     },
     one_time_prekeys: oneTimePreKeys,
   });
+  logEntry("info", "identity_key_bundle_uploaded", { userId, oneTimePreKeyCount: oneTimePreKeys.length });
 }
 
 function addressFor(username: string): SignalProtocolAddress {
@@ -154,12 +224,7 @@ async function getKeyBundleWithRetry(username: string) {
       }
       if (attempt === KEY_BUNDLE_FETCH_RETRIES) break;
       const delay = KEY_BUNDLE_RETRY_BASE_DELAY_MS * 2 ** attempt;
-      console.warn(
-        `⚠️ Fetching key bundle for "${username}" failed (attempt ${attempt + 1}/${
-          KEY_BUNDLE_FETCH_RETRIES + 1
-        }), retrying in ${delay}ms...`,
-        err
-      );
+      logEntry("warn", "key_bundle_fetch_retry", { username, attempt: attempt + 1, maxAttempts: KEY_BUNDLE_FETCH_RETRIES + 1, delay, error: String(err) });
       await sleep(delay);
     }
   }
@@ -171,34 +236,49 @@ async function getKeyBundleWithRetry(username: string) {
 async function ensureSessionWith(myUserId: string, username: string, forceRefresh = false): Promise<void> {
   const store = getStore(myUserId);
   const address = addressFor(username);
+  const addressStr = address.toString();
 
-  if (forceRefresh) {
-    await store.removeSession(address.toString());
-  } else {
-    const existingSession = await store.loadSession(address.toString());
-    if (existingSession) return;
-  }
+  logEntry("debug", "ensure_session_started", { myUserId, username, forceRefresh });
 
-  const bundle = await getKeyBundleWithRetry(username);
+  // Use per-conversation mutex to prevent concurrent session establishment
+  await withSessionLock(myUserId, username, async () => {
+    // Re-check after acquiring lock in case another caller already created the session
+    if (!forceRefresh) {
+      const existingSession = await store.loadSession(addressStr);
+      if (existingSession) {
+        logEntry("debug", "session_already_exists", { myUserId, username });
+        return;
+      }
+    } else {
+      logEntry("info", "session_force_refresh", { myUserId, username });
+      await store.removeSession(addressStr);
+    }
 
-  const preKeyBundle: any = {
-    identityKey: base64ToBuf(bundle.identity_key),
-    registrationId: bundle.registration_id,
-    signedPreKey: {
-      keyId: bundle.signed_prekey.key_id,
-      publicKey: base64ToBuf(bundle.signed_prekey.public_key),
-      signature: base64ToBuf(bundle.signed_prekey.signature),
-    },
-  };
-  if (bundle.one_time_prekey) {
-    preKeyBundle.preKey = {
-      keyId: bundle.one_time_prekey.key_id,
-      publicKey: base64ToBuf(bundle.one_time_prekey.public_key),
+    logEntry("info", "session_building_x3dh", { myUserId, username });
+
+    const bundle = await getKeyBundleWithRetry(username);
+
+    const preKeyBundle: any = {
+      identityKey: base64ToBuf(bundle.identity_key),
+      registrationId: bundle.registration_id,
+      signedPreKey: {
+        keyId: bundle.signed_prekey.key_id,
+        publicKey: base64ToBuf(bundle.signed_prekey.public_key),
+        signature: base64ToBuf(bundle.signed_prekey.signature),
+      },
     };
-  }
+    if (bundle.one_time_prekey) {
+      preKeyBundle.preKey = {
+        keyId: bundle.one_time_prekey.key_id,
+        publicKey: base64ToBuf(bundle.one_time_prekey.public_key),
+      };
+    }
 
-  const sessionBuilder = new SessionBuilder(store as any, address);
-  await sessionBuilder.processPreKey(preKeyBundle);
+    const sessionBuilder = new SessionBuilder(store as any, address);
+    await sessionBuilder.processPreKey(preKeyBundle);
+
+    logEntry("info", "session_created", { myUserId, username });
+  });
 }
 
 export interface SignalEnvelope {
@@ -211,44 +291,53 @@ export async function encryptForUser(myUserId: string, username: string, plainte
   const store = getStore(myUserId);
   const address = addressFor(username);
 
-  try {
-    await ensureSessionWith(myUserId, username);
-    const cipher = new SessionCipher(store as any, address);
-    const encoded = new TextEncoder().encode(plaintext).buffer;
-    const ciphertext = await cipher.encrypt(encoded);
+  return withSessionLock(myUserId, username, async () => {
+    try {
+      await ensureSessionWith(myUserId, username);
+      const cipher = new SessionCipher(store as any, address);
+      const encoded = new TextEncoder().encode(plaintext).buffer;
+      const ciphertext = await cipher.encrypt(encoded);
 
-    return {
-      content: bufToBase64(
-        typeof ciphertext.body === "string"
-          ? Uint8Array.from(ciphertext.body, (c) => c.charCodeAt(0)).buffer
-          : ciphertext.body
-      ),
-      msg_type: ciphertext.type,
-    };
-  } catch (err: any) {
-    // If the existing session is stale/corrupt (e.g. invalid signature from old key),
-    // delete local session state, force re-fetching latest bundle, and retry once.
-    console.warn(`Signal encryption failed for ${username}, resetting session & retrying...`, err);
-    await store.removeSession(address.toString());
-    await ensureSessionWith(myUserId, username, true);
+      logEntry("debug", "encrypt", { username, msgType: ciphertext.type });
 
-    const cipher = new SessionCipher(store as any, address);
-    const encoded = new TextEncoder().encode(plaintext).buffer;
-    const ciphertext = await cipher.encrypt(encoded);
+      return {
+        content: bufToBase64(
+          typeof ciphertext.body === "string"
+            ? Uint8Array.from(ciphertext.body, (c) => c.charCodeAt(0)).buffer
+            : ciphertext.body
+        ),
+        msg_type: ciphertext.type,
+      };
+    } catch (err: any) {
+      // If the existing session is stale/corrupt (e.g. invalid signature from old key),
+      // delete local session state, force re-fetching latest bundle, and retry once.
+      logEntry("warn", "encrypt_failed_retrying", { username, error: err?.message });
+      await store.removeSession(address.toString());
+      await ensureSessionWith(myUserId, username, true);
 
-    return {
-      content: bufToBase64(
-        typeof ciphertext.body === "string"
-          ? Uint8Array.from(ciphertext.body, (c) => c.charCodeAt(0)).buffer
-          : ciphertext.body
-      ),
-      msg_type: ciphertext.type,
-    };
-  }
+      const cipher = new SessionCipher(store as any, address);
+      const encoded = new TextEncoder().encode(plaintext).buffer;
+      const ciphertext = await cipher.encrypt(encoded);
+
+      return {
+        content: bufToBase64(
+          typeof ciphertext.body === "string"
+            ? Uint8Array.from(ciphertext.body, (c) => c.charCodeAt(0)).buffer
+            : ciphertext.body
+        ),
+        msg_type: ciphertext.type,
+      };
+    }
+  });
 }
 
 /** Decrypts a message from/to `username`. Handles both the first (PreKey) message and subsequent ones. */
-export async function decryptFromUser(myUserId: string, username: string, envelope: SignalEnvelope): Promise<string> {
+export async function decryptFromUser(
+  myUserId: string,
+  username: string,
+  envelope: SignalEnvelope,
+  conversationId?: string
+): Promise<string> {
   const store = getStore(myUserId);
   const address = addressFor(username);
 
@@ -265,13 +354,27 @@ export async function decryptFromUser(myUserId: string, username: string, envelo
       plaintextBuf = await cipher.decryptWhisperMessage(bodyBinaryString, "binary");
     }
 
+    logEntry("debug", "decrypt", { username, msgType: envelope.msg_type });
     return new TextDecoder().decode(plaintextBuf);
   } catch (err: any) {
     // If decryption fails (e.g., Bad MAC due to desynced session or cleared site storage),
     // purge the stale local session so that the NEXT new message automatically re-establishes
     // a clean fresh X3DH session.
-    console.warn(`Signal decryption failed for message from ${username} (${err?.message || err}). Purging stale session for future messages.`);
+    logEntry("warn", "decrypt_failed_purging_session", { username, error: err?.message, msgType: envelope.msg_type });
     await store.removeSession(address.toString());
+    // Notify the other party to also reset their session so both sides re-establish
+    if (conversationId) {
+      notifySessionReset(conversationId).catch((e) => logEntry("error", "session_reset_notify_failed", { conversationId, error: e?.message }));
+    }
     return "[Unable to decrypt message]";
   }
+}
+
+/** Forces a session reset with `username` by removing the local session state.
+ *  The next encryptForUser call will trigger a fresh X3DH handshake. */
+export async function forceSessionReset(myUserId: string, username: string): Promise<void> {
+  const store = getStore(myUserId);
+  const address = addressFor(username);
+  logEntry("info", "force_session_reset", { myUserId, username });
+  await store.removeSession(address.toString());
 }

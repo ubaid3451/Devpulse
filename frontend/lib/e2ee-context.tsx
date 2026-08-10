@@ -12,12 +12,13 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useAuth } from "./auth-context";
-import { ensureIdentitySetUp, encryptForUser, decryptFromUser, SignalEnvelope } from "./signal-e2ee";
+import { ensureIdentitySetUp, encryptForUser, decryptFromUser, forceSessionReset, SignalEnvelope } from "./signal-e2ee";
 
 interface E2EEContextValue {
   isReady: boolean;
   encryptFor: (otherUsername: string, plaintext: string) => Promise<SignalEnvelope>;
   decryptFrom: (otherUsername: string, envelope: SignalEnvelope) => Promise<string>;
+  forceSessionReset: (otherUsername: string) => Promise<void>;
 }
 
 const E2EEContext = createContext<E2EEContextValue | null>(null);
@@ -57,8 +58,13 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
     return decryptFromUser(user.id, otherUsername, envelope);
   };
 
+  const handleForceSessionReset = async (otherUsername: string) => {
+    if (!user) throw new Error("Not logged in");
+    return forceSessionReset(user.id, otherUsername);
+  };
+
   return (
-    <E2EEContext.Provider value={{ isReady, encryptFor, decryptFrom }}>
+    <E2EEContext.Provider value={{ isReady, encryptFor, decryptFrom, forceSessionReset: handleForceSessionReset }}>
       {children}
     </E2EEContext.Provider>
   );

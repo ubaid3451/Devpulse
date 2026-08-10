@@ -22,6 +22,7 @@ import {
   hideConversation,
   markConversationRead,
 } from "@/lib/api";
+import { logEntry } from "@/lib/signal-e2ee";
 
 function ChatPageContent() {
   const router = useRouter();
@@ -87,6 +88,9 @@ function ChatPageContent() {
 
   const [decryptedPreviews, setDecryptedPreviews] = useState<Record<string, string>>({});
 
+  // Track processed message IDs to prevent double-decryption on WebSocket reconnect/replay
+  const processedMessageIds = useRef<Set<string>>(new Set());
+
   const refreshConversations = () => {
     getConversations()
       .then(async (convos) => {
@@ -112,7 +116,7 @@ function ChatPageContent() {
               const plaintext = await decryptFrom(otherUsername, {
                 content: convo.last_message,
                 msg_type: Number(convo.last_message_msg_type),
-              });
+              }, convo.conversation_id);
               cacheMessagePlaintext(currentUser.id, convo.last_message_id, plaintext);
               previews[convo.conversation_id] = plaintext;
             } catch (err) {
@@ -183,7 +187,7 @@ function ChatPageContent() {
             }
 
             try {
-              const plaintext = await decryptFrom(otherUsername, { content: msg.content || "", msg_type: Number(msg.msg_type) });
+              const plaintext = await decryptFrom(otherUsername, { content: msg.content || "", msg_type: Number(msg.msg_type) }, activeConversationId);
               if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
               return { ...msg, content: plaintext };
             } catch (err) {
@@ -246,6 +250,15 @@ function ChatPageContent() {
 
   useEffect(() => {
     const unsubMessage = onChatMessage(async (msg) => {
+      // Deduplication: skip if we've already processed this message ID
+      // This prevents double-decryption on WebSocket reconnect/replay which
+      // would advance the Double Ratchet twice on recipient but only once on sender
+      if (processedMessageIds.current.has(msg.id)) {
+        logEntry("debug", "duplicate_message_skipped", { messageId: msg.id });
+        return;
+      }
+      processedMessageIds.current.add(msg.id);
+
       const isOwnMessage = msg.sender_id === currentUser?.id;
       let plaintextContent = msg.content;
       let toAppend = msg;
@@ -264,12 +277,12 @@ function ChatPageContent() {
         toAppend = { ...msg, content: plaintextContent };
       } else if (msg.msg_type && e2eeReady && otherUsername) {
         try {
-          const plaintext = await decryptFrom(otherUsername, { content: msg.content || "", msg_type: Number(msg.msg_type) });
+          const plaintext = await decryptFrom(otherUsername, { content: msg.content || "", msg_type: Number(msg.msg_type) }, msg.conversation_id);
           if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
           plaintextContent = plaintext;
           toAppend = { ...msg, content: plaintext };
         } catch (err) {
-          console.error("Failed to decrypt incoming message", err);
+          logEntry("error", "incoming_message_decrypt_failed", { messageId: msg.id, error: String(err) });
           plaintextContent = "[Unable to decrypt message]";
           toAppend = { ...msg, content: plaintextContent };
         }
@@ -355,7 +368,7 @@ function ChatPageContent() {
           pendingSentPlaintexts.current.push(plaintext);
           sendMessage(activeConversationId, content, imageUrl, msg_type);
         } catch (encryptErr) {
-          console.warn(`Fallback to plaintext send for ${otherUsername} (recipient key bundle not available):`, encryptErr);
+          logEntry("warn", "encrypt_failed_fallback_plaintext", { otherUsername, error: String(encryptErr) });
           sendMessage(activeConversationId, plaintext, imageUrl);
         }
       } else {
@@ -366,7 +379,7 @@ function ChatPageContent() {
       setAttachedImage(null);
       setShowEmojiPicker(false);
     } catch (err) {
-      console.error("Failed to send message", err);
+      logEntry("error", "send_message_failed", { error: String(err) });
     } finally {
       setIsUploading(false);
     }
@@ -479,7 +492,11 @@ function ChatPageContent() {
               )
             ) : (
               <>
-                {conversations.map((conv) => {
+                {conversations.filter((conv) => {
+                    // Hide conversations where the other user was deleted (no participants left)
+                    if (!conv.is_group && (!conv.participants[0] || !conv.participants[0].username)) return false;
+                    return true;
+                  }).map((conv) => {
                   const other = conv.participants[0];
                   const title = conv.is_group ? conv.name || "Group chat" : other?.full_name || other?.username;
                   const avatar = conv.is_group ? null : other?.avatar_url;
