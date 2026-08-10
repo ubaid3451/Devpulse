@@ -10,7 +10,6 @@ import { requestNotificationPermission, showDesktopNotification, isTabHidden } f
 import AppLayout from "@/components/AppLayout";
 import CreateGroupModal from "@/components/CreateGroupModal";
 import EmojiPicker, { Theme } from "emoji-picker-react";
-import { ChatList } from "@/components/chat-list";
 import {
   getConversations,
   ConversationResponse,
@@ -52,9 +51,6 @@ function ChatPageContent() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Ask for desktop notification permission once, on mount — matches the
-  // "prompt on connect" intent, just moved here since this is where
-  // notifications actually get triggered (see onChatMessage below).
   useEffect(() => {
     requestNotificationPermission();
   }, []);
@@ -79,9 +75,6 @@ function ChatPageContent() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pendingSentPlaintexts = useRef<string[]>([]);
-  // Keep a ref mirror of conversations/activeConversationId so the
-  // onChatMessage handler (registered once, see effect deps below) can read
-  // fresh values without needing to be re-subscribed on every conversation change.
   const conversationsRef = useRef<ConversationResponse[]>([]);
   const activeConversationIdRef = useRef<string | null>(null);
 
@@ -147,10 +140,15 @@ function ChatPageContent() {
       })
       .catch((err) => {
         console.error("Failed to start conversation", err);
-        if (err?.status === 403) {
+        const existing = conversations.find(
+          (c) => !c.is_group && c.participants.some((p) => p.username === initialUsername)
+        );
+        if (existing) {
+          setActiveConversationId(existing.conversation_id);
+        } else if (err?.status === 403) {
           alert("You can't message this user.");
+          router.replace("/chat");
         }
-        router.replace("/chat");
       })
       .finally(() => setIsResolvingConversation(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -197,7 +195,7 @@ function ChatPageContent() {
         setMessages(decrypted);
       })
       .catch((err) => console.error("Failed to load history", err));
-  }, [activeConversationId, conversations, e2eeReady, decryptFrom]);
+  }, [activeConversationId, conversations, e2eeReady, decryptFrom, currentUser]);
 
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -221,15 +219,10 @@ function ChatPageContent() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Mark the conversation as read whenever it's opened (or new messages
-  // arrive while it's already open) — this both clears the unread badge
-  // and tells the OTHER participant(s) their sent messages have been seen.
   useEffect(() => {
     if (!activeConversationId) return;
     markConversationRead(activeConversationId)
       .then(() => {
-        // Optimistically clear the local unread badge immediately rather
-        // than waiting for the next refreshConversations() poll.
         setConversations((prev) =>
           prev.map((c) =>
             c.conversation_id === activeConversationId ? { ...c, unread_count: 0 } : c
@@ -239,9 +232,6 @@ function ChatPageContent() {
       .catch((err) => console.error("Failed to mark conversation read", err));
   }, [activeConversationId, messages.length]);
 
-  // Live read-receipt updates: when the OTHER participant reads our sent
-  // messages, flip their is_read flag locally so the checkmark updates
-  // without needing a refetch.
   useEffect(() => {
     const unsub = onMessagesRead((event) => {
       if (event.conversation_id !== activeConversationIdRef.current) return;
@@ -254,17 +244,12 @@ function ChatPageContent() {
     return unsub;
   }, [onMessagesRead]);
 
-  // Subscribe to the shared root-level socket for message + reaction events.
   useEffect(() => {
     const unsubMessage = onChatMessage(async (msg) => {
       const isOwnMessage = msg.sender_id === currentUser?.id;
-      let plaintextContent = msg.content; // stays as ciphertext unless decrypted below
+      let plaintextContent = msg.content;
       let toAppend = msg;
 
-      // Look up the conversation this message belongs to (not necessarily
-      // the currently-open one — a message can arrive for ANY conversation,
-      // and we need sender info to build a notification regardless of
-      // whether that chat is open).
       const msgConvo = conversationsRef.current.find((c) => c.conversation_id === msg.conversation_id);
       const otherUsername = msgConvo && !msgConvo.is_group ? msgConvo.participants[0]?.username : undefined;
 
@@ -289,21 +274,13 @@ function ChatPageContent() {
           toAppend = { ...msg, content: plaintextContent };
         }
       } else {
-        // Not encrypted (plaintext-era message or group chat) — content is
-        // already readable as-is.
         toAppend = msg;
       }
 
-      // Only append to the visible message list if this event belongs to
-      // the conversation currently open.
       if (msg.conversation_id === activeConversationIdRef.current) {
         setMessages((prev) => [...prev, toAppend]);
       }
 
-      // Desktop notification: only for messages from someone ELSE, and only
-      // when the tab is backgrounded (otherwise the in-app UI is enough).
-      // Fires with the DECRYPTED plaintext — never raw ciphertext — since
-      // this runs after the decrypt logic above has already resolved it.
       if (!isOwnMessage && isTabHidden()) {
         const senderName =
           msgConvo?.is_group
@@ -346,7 +323,12 @@ function ChatPageContent() {
       refreshConversations();
     } catch (err: any) {
       console.error("Failed to start conversation", err);
-      if (err?.status === 403) {
+      const existing = conversations.find(
+        (c) => !c.is_group && c.participants.some((p) => p.username === user.username)
+      );
+      if (existing) {
+        setActiveConversationId(existing.conversation_id);
+      } else if (err?.status === 403) {
         alert("You can't message this user.");
       }
     }
@@ -500,13 +482,14 @@ function ChatPageContent() {
                   const isMenuOpen = openMenuId === conv.conversation_id;
                   const isPendingDelete = pendingDeleteId === conv.conversation_id;
                   const isDeleting = deletingId === conv.conversation_id;
+                  const isBlocked = conv.is_blocked;
 
                   return (
                     <div
                       key={conv.conversation_id}
                       className={`group relative p-3 mx-2 my-1 rounded-lg transition-colors flex items-center gap-3 ${
                         isActive ? "bg-[#1e2025]" : "hover:bg-[#1e2025]/50"
-                      }`}
+                      } ${isBlocked ? 'opacity-60' : ''}`}
                     >
                       <div
                         onClick={() => setActiveConversationId(conv.conversation_id)}
@@ -553,7 +536,14 @@ function ChatPageContent() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between items-baseline mb-0.5">
-                            <div className="font-bold text-sm truncate">{title}</div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-sm truncate">{title}</span>
+                              {isBlocked && !conv.is_group && (
+                                <span className="material-symbols-outlined text-[14px] text-red-400 shrink-0" title="Blocked">
+                                  block
+                                </span>
+                              )}
+                            </div>
                           </div>
                           <div className="text-[13px] text-on-surface-variant truncate opacity-80">
                             {conv.last_message_encrypted
@@ -671,7 +661,15 @@ function ChatPageContent() {
                   <div className="min-w-0">
                     <div className="font-bold flex items-center gap-1.5 truncate">
                       <span className="truncate">{headerTitle}</span>
-                      {!activeConversation?.is_group && e2eeReady && (
+                      {activeConversation?.is_blocked && (
+                        <span
+                          className="material-symbols-outlined text-[16px] text-red-400 shrink-0"
+                          title="Blocked"
+                        >
+                          block
+                        </span>
+                      )}
+                      {!activeConversation?.is_group && e2eeReady && !activeConversation?.is_blocked && (
                         <span
                           className="material-symbols-outlined text-[15px] text-green-500 shrink-0"
                           title="Messages are end-to-end encrypted"
@@ -680,8 +678,12 @@ function ChatPageContent() {
                         </span>
                       )}
                     </div>
-                    {otherUserId && onlineUsers.has(otherUserId) && (
-                      <div className="text-[12px] text-green-500 font-medium">Online</div>
+                    {activeConversation?.is_blocked ? (
+                      <div className="text-[12px] text-red-400 font-medium">Blocked user</div>
+                    ) : (
+                      otherUserId && onlineUsers.has(otherUserId) && (
+                        <div className="text-[12px] text-green-500 font-medium">Online</div>
+                      )
                     )}
                   </div>
                 </div>
@@ -806,82 +808,89 @@ function ChatPageContent() {
               </div>
 
               <div className="p-4 bg-[#0b0d10] border-t border-outline-variant/20">
-                <div className="bg-[#111318] border border-outline-variant/40 rounded-xl overflow-hidden focus-within:border-primary/50 transition-colors">
-                  <div className="px-3 py-2 border-b border-outline-variant/20 flex gap-2 text-on-surface-variant relative">
-                    <button onClick={() => insertTextAtCursor("**", "**")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm">B</button>
-                    <button onClick={() => insertTextAtCursor("*", "*")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm italic">I</button>
-                    <button onClick={() => insertTextAtCursor("`", "`")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors text-sm">&lt; &gt;</button>
-                    <button onClick={() => insertTextAtCursor("[", "](url)")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"><span className="material-symbols-outlined text-[16px]">link</span></button>
-                    <button
-                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                      className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">sentiment_satisfied</span>
-                    </button>
+                {activeConversation?.is_blocked ? (
+                  <div className="bg-[#1e2025]/90 border border-red-500/30 rounded-xl p-4 text-center text-red-400 flex items-center justify-center gap-2">
+                    <span className="material-symbols-outlined text-[20px]">block</span>
+                    <span className="text-sm font-medium">You can&apos;t message a blocked user</span>
+                  </div>
+                ) : (
+                  <div className="bg-[#111318] border border-outline-variant/40 rounded-xl overflow-hidden focus-within:border-primary/50 transition-colors">
+                    <div className="px-3 py-2 border-b border-outline-variant/20 flex gap-2 text-on-surface-variant relative">
+                      <button onClick={() => insertTextAtCursor("**", "**")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm">B</button>
+                      <button onClick={() => insertTextAtCursor("*", "*")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm italic">I</button>
+                      <button onClick={() => insertTextAtCursor("`", "`")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors text-sm">&lt; &gt;</button>
+                      <button onClick={() => insertTextAtCursor("[", "](url)")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"><span className="material-symbols-outlined text-[16px]">link</span></button>
+                      <button
+                        onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                        className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">sentiment_satisfied</span>
+                      </button>
 
-                    {showEmojiPicker && (
-                      <div className="absolute bottom-full left-0 mb-2 z-30">
-                        <EmojiPicker
-                          onEmojiClick={(e) => setInputText((prev) => prev + e.emoji)}
-                          theme={Theme.DARK}
-                        />
+                      {showEmojiPicker && (
+                        <div className="absolute bottom-full left-0 mb-2 z-30">
+                          <EmojiPicker
+                            onEmojiClick={(e) => setInputText((prev) => prev + e.emoji)}
+                            theme={Theme.DARK}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {attachedImage && (
+                      <div className="px-4 py-2 bg-surface-variant/20 border-b border-outline-variant/20 flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm text-primary truncate">
+                          <span className="material-symbols-outlined text-[18px]">image</span>
+                          {attachedImage.name}
+                        </div>
+                        <button onClick={() => setAttachedImage(null)} className="text-on-surface-variant hover:text-red-400">
+                          <span className="material-symbols-outlined text-[18px]">close</span>
+                        </button>
                       </div>
                     )}
-                  </div>
 
-                  {attachedImage && (
-                    <div className="px-4 py-2 bg-surface-variant/20 border-b border-outline-variant/20 flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-sm text-primary truncate">
-                        <span className="material-symbols-outlined text-[18px]">image</span>
-                        {attachedImage.name}
-                      </div>
-                      <button onClick={() => setAttachedImage(null)} className="text-on-surface-variant hover:text-red-400">
-                        <span className="material-symbols-outlined text-[18px]">close</span>
+                    <div className="flex items-end p-2 gap-2">
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        className="hidden"
+                        accept="image/*"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            setAttachedImage(e.target.files[0]);
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="p-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/50 rounded-lg transition-colors"
+                      >
+                        <span className="material-symbols-outlined">attach_file</span>
+                      </button>
+                      <textarea
+                        ref={textareaRef}
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            sendChatMessage();
+                          }
+                        }}
+                        placeholder="Write a message or paste code..."
+                        className="flex-1 bg-transparent border-none resize-none max-h-32 min-h-[44px] py-3 focus:outline-none focus:ring-0 text-[15px]"
+                        rows={1}
+                      />
+                      <button
+                        onClick={sendChatMessage}
+                        disabled={(!inputText.trim() && !attachedImage) || isUploading}
+                        className="p-3 bg-[#71d4ff] text-[#003548] rounded-lg disabled:opacity-50 hover:brightness-110 transition-colors shrink-0 mb-1"
+                      >
+                        <span className="material-symbols-outlined text-[20px]">{isUploading ? "hourglass_empty" : "send"}</span>
                       </button>
                     </div>
-                  )}
-
-                  <div className="flex items-end p-2 gap-2">
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      className="hidden"
-                      accept="image/*"
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files[0]) {
-                          setAttachedImage(e.target.files[0]);
-                        }
-                      }}
-                    />
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="p-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/50 rounded-lg transition-colors"
-                    >
-                      <span className="material-symbols-outlined">attach_file</span>
-                    </button>
-                    <textarea
-                      ref={textareaRef}
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          sendChatMessage();
-                        }
-                      }}
-                      placeholder="Write a message or paste code..."
-                      className="flex-1 bg-transparent border-none resize-none max-h-32 min-h-[44px] py-3 focus:outline-none focus:ring-0 text-[15px]"
-                      rows={1}
-                    />
-                    <button
-                      onClick={sendChatMessage}
-                      disabled={(!inputText.trim() && !attachedImage) || isUploading}
-                      className="p-3 bg-[#71d4ff] text-[#003548] rounded-lg disabled:opacity-50 hover:brightness-110 transition-colors shrink-0 mb-1"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">{isUploading ? "hourglass_empty" : "send"}</span>
-                    </button>
                   </div>
-                </div>
+                )}
               </div>
             </>
           ) : (

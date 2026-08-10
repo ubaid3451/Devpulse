@@ -192,11 +192,22 @@ export interface UserProfileResponse {
 
 export interface ExploreUser extends AuthorResponse {
   bio?: string | null;
+  is_private?: boolean;
   is_following?: boolean;
+  has_pending_request?: boolean;
 }
 
+export interface ExploreUsersResponse {
+  users: ExploreUser[];
+  total: number;
+  has_more: boolean;
+}
+
+export type ToggleFollowStatusType = "followed" | "unfollowed" | "requested" | "request_cancelled";
+
 export interface ToggleFollowStatus {
-  is_following: boolean;
+  status: ToggleFollowStatusType;
+  is_following?: boolean;
 }
 
 export interface BlockedUser {
@@ -390,8 +401,8 @@ export async function searchUsers(query: string): Promise<AuthorResponse[]> {
   return apiGet<AuthorResponse[]>("/users/search", { q: query });
 }
 
-export async function getExploreUsers(skip = 0, limit = 20): Promise<ExploreUser[]> {
-  return apiGet<ExploreUser[]>("/users/explore", { skip, limit });
+export async function getExploreUsers(skip = 0, limit = 20): Promise<ExploreUsersResponse> {
+  return apiGet<ExploreUsersResponse>("/users/explore", { skip, limit });
 }
 
 export async function toggleFollow(username: string): Promise<ToggleFollowStatus> {
