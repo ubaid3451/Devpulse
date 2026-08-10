@@ -125,7 +125,7 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
         </aside>
 
         {/* Main Content Area */}
-        <div className="flex-1 min-w-0 flex flex-col h-screen overflow-hidden bg-surface">
+        <div className="flex-1 min-w-0 flex flex-col h-screen overflow-hidden bg-surface pb-16 md:pb-0">
           {children}
         </div>
       </div>

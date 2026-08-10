@@ -19,7 +19,7 @@ function AdminTabs({ active }: { active: "dashboard" | "users" | "posts" }) {
   ] as const;
 
   return (
-    <div className="flex gap-2 border-b border-outline-variant/30 px-6 pt-4">
+    <div className="flex gap-2 border-b border-outline-variant/30 px-4 sm:px-6 pt-4 overflow-x-auto">
       {tabs.map((tab) => (
         <Link
           key={tab.id}
@@ -175,7 +175,7 @@ export default function AdminDashboardPage() {
       <div className="flex flex-col h-full overflow-y-auto">
         <AdminTabs active="dashboard" />
 
-        <div className="p-6">
+        <div className="p-4 sm:p-6">
           <h1 className="text-xl font-bold mb-6">Dashboard</h1>
 
           {error && (
@@ -192,7 +192,7 @@ export default function AdminDashboardPage() {
             <div className="text-on-surface-variant text-sm">Loading stats...</div>
           ) : (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <StatCard label="Total Users" value={stats.total_users} />
                 <StatCard label="Total Posts" value={stats.total_posts} />
                 <StatCard label="Active Posts" value={stats.active_posts} />

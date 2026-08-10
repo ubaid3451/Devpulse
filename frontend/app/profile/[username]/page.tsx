@@ -98,7 +98,7 @@ export default function UserProfilePage({ params }: { params: { username: string
       </header>
 
       <main className="max-w-3xl mx-auto p-md lg:p-lg mt-8">
-        <div className="bg-surface-container-low border border-outline-variant rounded-xl p-xl flex flex-col items-center text-center">
+        <div className="bg-surface-container-low border border-outline-variant rounded-xl p-4 sm:p-6 lg:p-8 flex flex-col items-center text-center">
           <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-surface bg-surface-container-highest flex shrink-0 items-center justify-center mb-6 shadow-xl">
             {profile.avatar_url ? (
                <img src={profile.avatar_url} alt={profile.username} className="w-full h-full object-cover" />
@@ -123,20 +123,20 @@ export default function UserProfilePage({ params }: { params: { username: string
             </p>
           </div>
 
-          <div className="flex gap-4 text-body-sm text-on-surface-variant mb-8">
+          <div className="flex flex-wrap justify-center items-center gap-3 sm:gap-4 text-body-sm text-on-surface-variant mb-8">
             <span className="flex items-center gap-1 font-bold text-on-surface">
               {profile.followers_count ?? 0} <span className="font-normal text-on-surface-variant">Followers</span>
             </span>
             <span className="flex items-center gap-1 font-bold text-on-surface">
               {profile.following_count ?? 0} <span className="font-normal text-on-surface-variant">Following</span>
             </span>
-            <span className="flex items-center gap-1 ml-4">
+            <span className="flex items-center gap-1">
               <span className="material-symbols-outlined text-[18px]">calendar_today</span>
               Joined {new Date(profile.created_at).toLocaleDateString()}
             </span>
           </div>
 
-          <div className="flex gap-4">
+          <div className="flex flex-wrap justify-center gap-3 sm:gap-4">
             {isOwnProfile ? (
               <button
                 onClick={() => router.push("/profile")}

@@ -15,7 +15,7 @@ function AdminTabs({ active }: { active: "dashboard" | "users" | "posts" }) {
   ] as const;
 
   return (
-    <div className="flex gap-2 border-b border-outline-variant/30 px-6 pt-4">
+    <div className="flex gap-2 border-b border-outline-variant/30 px-4 sm:px-6 pt-4 overflow-x-auto">
       {tabs.map((tab) => (
         <Link
           key={tab.id}
@@ -133,10 +133,10 @@ export default function AdminPostsPage() {
       <div className="flex flex-col h-full overflow-y-auto">
         <AdminTabs active="posts" />
 
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
+        <div className="p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
             <h1 className="text-xl font-bold">Posts</h1>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-2 text-sm text-on-surface-variant">
                 <input
                   type="checkbox"
@@ -151,7 +151,7 @@ export default function AdminPostsPage() {
                 placeholder="Search title, content, or author..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="bg-[#1e2025] border border-outline-variant/50 rounded-lg px-3 py-2 text-sm w-72 focus:outline-none focus:border-primary transition-colors"
+                className="bg-[#1e2025] border border-outline-variant/50 rounded-lg px-3 py-2 text-sm w-full sm:w-72 focus:outline-none focus:border-primary transition-colors"
               />
             </div>
           </div>
@@ -160,8 +160,8 @@ export default function AdminPostsPage() {
             <div className="mb-4 p-3 rounded-lg bg-error-container/20 text-error text-sm">{error}</div>
           )}
 
-          <div className="border border-outline-variant/30 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="border border-outline-variant/30 rounded-xl overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
               <thead className="bg-[#111318] text-on-surface-variant text-left">
                 <tr>
                   <th className="px-4 py-3 font-medium">Post</th>
@@ -258,7 +258,7 @@ export default function AdminPostsPage() {
             </table>
           </div>
 
-          <div className="flex items-center justify-between mt-4 text-sm text-on-surface-variant">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between mt-4 gap-3 text-sm text-on-surface-variant">
             <div>
               Page {currentPage} of {totalPages} ({total} total)
             </div>

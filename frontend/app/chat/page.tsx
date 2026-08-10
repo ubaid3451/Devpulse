@@ -118,7 +118,7 @@ function ChatPageContent() {
             try {
               const plaintext = await decryptFrom(otherUsername, {
                 content: convo.last_message,
-                msg_type: convo.last_message_msg_type,
+                msg_type: Number(convo.last_message_msg_type),
               });
               cacheMessagePlaintext(currentUser.id, convo.last_message_id, plaintext);
               previews[convo.conversation_id] = plaintext;
@@ -185,7 +185,7 @@ function ChatPageContent() {
             }
 
             try {
-              const plaintext = await decryptFrom(otherUsername, { content: msg.content, msg_type: msg.msg_type! });
+              const plaintext = await decryptFrom(otherUsername, { content: msg.content || "", msg_type: Number(msg.msg_type) });
               if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
               return { ...msg, content: plaintext };
             } catch (err) {
@@ -279,7 +279,7 @@ function ChatPageContent() {
         toAppend = { ...msg, content: plaintextContent };
       } else if (msg.msg_type && e2eeReady && otherUsername) {
         try {
-          const plaintext = await decryptFrom(otherUsername, { content: msg.content, msg_type: msg.msg_type! });
+          const plaintext = await decryptFrom(otherUsername, { content: msg.content || "", msg_type: Number(msg.msg_type) });
           if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
           plaintextContent = plaintext;
           toAppend = { ...msg, content: plaintext };
@@ -314,7 +314,7 @@ function ChatPageContent() {
 
         showDesktopNotification({
           title: `New message from ${senderName}`,
-          body: msg.image_url && !plaintextContent ? "Sent an attachment" : plaintextContent,
+          body: (msg.image_url && !plaintextContent ? "Sent an attachment" : plaintextContent) || "",
           tag: `chat-conv-${msg.conversation_id}`,
           onClick: () => {
             router.push(`/chat?id=${msg.conversation_id}`);
@@ -419,11 +419,11 @@ function ChatPageContent() {
 
   const participantMap: Record<string, { avatar_url: string | null; name: string }> = {};
   activeConversation?.participants.forEach((p) => {
-    participantMap[p.id] = { avatar_url: p.avatar_url, name: p.full_name || p.username };
+    participantMap[p.id] = { avatar_url: p.avatar_url ?? null, name: p.full_name || p.username };
   });
   if (currentUser) {
     participantMap[currentUser.id] = {
-      avatar_url: currentUser.avatar_url,
+      avatar_url: currentUser.avatar_url ?? null,
       name: currentUser.full_name || currentUser.username,
     };
   }
@@ -433,8 +433,10 @@ function ChatPageContent() {
   return (
     <AppLayout activeNav="messages">
       <div className="flex flex-1 overflow-hidden bg-surface text-on-surface w-full h-full">
-        {/* Conversations Sidebar */}
-        <div className="w-[320px] shrink-0 border-r border-outline-variant flex flex-col bg-[#111318]">
+        {/* Conversations Sidebar — full screen on mobile when no convo is active, hidden otherwise */}
+        <div className={`${
+          activeConversationId ? 'hidden md:flex' : 'flex'
+        } md:flex flex-col md:w-72 lg:w-80 w-full shrink-0 border-r border-outline-variant bg-[#111318]`}>
           <div className="p-4 flex items-center justify-between border-b border-outline-variant/30">
             <h2 className="font-headline-sm text-headline-sm font-bold">Chats</h2>
             <button
@@ -559,9 +561,9 @@ function ChatPageContent() {
                               : conv.last_message || "No messages yet"}
                           </div>
                         </div>
-                        {conv.unread_count > 0 && (
+                        {(conv.unread_count ?? 0) > 0 && (
                           <div className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[#71d4ff] text-[#003548] text-[11px] font-bold flex items-center justify-center">
-                            {conv.unread_count > 99 ? "99+" : conv.unread_count}
+                            {(conv.unread_count ?? 0) > 99 ? "99+" : conv.unread_count}
                           </div>
                         )}
                       </div>
@@ -637,16 +639,26 @@ function ChatPageContent() {
           </div>
         </div>
 
-        {/* Chat Area */}
-        <div className="flex-1 flex flex-col bg-[#0b0d10] relative min-w-0">
+        {/* Chat Area — shown on mobile only when a conversation is active */}
+        <div className={`${
+          activeConversationId ? 'flex' : 'hidden md:flex'
+        } flex-1 flex-col bg-[#0b0d10] relative min-w-0`}>
           {isResolvingConversation ? (
             <div className="flex-1 flex items-center justify-center text-on-surface-variant/50">
               <p className="text-title-lg font-medium">Loading conversation...</p>
             </div>
           ) : activeConversationId ? (
             <>
-              <div className="h-16 px-6 border-b border-outline-variant/30 flex justify-between items-center bg-[#0b0d10]/95 backdrop-blur-md sticky top-0 z-10">
-                <div className="flex items-center gap-3">
+              <div className="h-16 px-3 sm:px-6 border-b border-outline-variant/30 flex justify-between items-center bg-[#0b0d10]/95 backdrop-blur-md sticky top-0 z-10">
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                  {/* Back button — mobile only */}
+                  <button
+                    onClick={() => setActiveConversationId(null)}
+                    className="md:hidden p-1.5 text-on-surface-variant hover:text-on-surface rounded-full hover:bg-surface-variant/30 transition-colors shrink-0"
+                    aria-label="Back to conversations"
+                  >
+                    <span className="material-symbols-outlined text-[22px]">arrow_back</span>
+                  </button>
                   <div className="w-10 h-10 rounded-full overflow-hidden bg-surface-variant shrink-0">
                     {headerAvatar ? (
                       <img src={headerAvatar} alt="Avatar" className="w-full h-full object-cover" />
@@ -656,12 +668,12 @@ function ChatPageContent() {
                       </div>
                     )}
                   </div>
-                  <div>
-                    <div className="font-bold flex items-center gap-1.5">
-                      {headerTitle}
+                  <div className="min-w-0">
+                    <div className="font-bold flex items-center gap-1.5 truncate">
+                      <span className="truncate">{headerTitle}</span>
                       {!activeConversation?.is_group && e2eeReady && (
                         <span
-                          className="material-symbols-outlined text-[15px] text-green-500"
+                          className="material-symbols-outlined text-[15px] text-green-500 shrink-0"
                           title="Messages are end-to-end encrypted"
                         >
                           lock
@@ -673,14 +685,14 @@ function ChatPageContent() {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-4 text-on-surface-variant">
+                <div className="flex items-center gap-2 sm:gap-4 text-on-surface-variant shrink-0">
                   <button onClick={() => alert("Audio calls coming soon!")} className="hover:text-primary transition-colors"><span className="material-symbols-outlined text-[22px]">call</span></button>
                   <button onClick={() => alert("Video calls coming soon!")} className="hover:text-primary transition-colors"><span className="material-symbols-outlined text-[22px]">videocam</span></button>
                   <button onClick={() => alert("Info panel coming soon!")} className="hover:text-primary transition-colors"><span className="material-symbols-outlined text-[22px]">info</span></button>
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
+              <div className="flex-1 overflow-y-auto p-3 sm:p-6 flex flex-col gap-4 sm:gap-6">
                 <div className="text-center text-[12px] text-on-surface-variant/50 relative mb-4">
                   <span className="bg-[#0b0d10] px-3 relative z-10">Today</span>
                   <div className="absolute top-1/2 left-0 w-full h-[1px] bg-outline-variant/20"></div>
@@ -709,7 +721,7 @@ function ChatPageContent() {
                         </div>
                       )}
 
-                      <div className={`flex flex-col ${isMine ? "items-end" : "items-start"} max-w-[70%] group`}>
+                      <div className={`flex flex-col ${isMine ? "items-end" : "items-start"} max-w-[85%] sm:max-w-[70%] group`}>
                         {activeConversation?.is_group && !isMine && showAvatar && (
                           <div className="text-[12px] font-medium text-on-surface-variant mb-1 px-1">
                             {sender.name}
