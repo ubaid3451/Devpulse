@@ -151,13 +151,15 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
         ))}
       </nav>
 
-      {/* FAB (Mobile only) */}
-      <button
-        onClick={() => setIsModalOpen(true)}
-        className="md:hidden fixed bottom-20 right-6 w-14 h-14 bg-primary-container text-on-primary-container rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-transform z-50"
-      >
-        <span className="material-symbols-outlined text-[28px]">add</span>
-      </button>
+      {/* FAB (Mobile only — hidden on messages page to avoid overlapping the chat send button) */}
+      {activeNav !== "messages" && (
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="md:hidden fixed bottom-20 right-6 w-14 h-14 bg-primary-container text-on-primary-container rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-transform z-40"
+        >
+          <span className="material-symbols-outlined text-[28px]">add</span>
+        </button>
+      )}
 
       {isModalOpen && (
         <CreatePostModal
