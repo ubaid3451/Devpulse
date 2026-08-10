@@ -164,8 +164,11 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
   };
 
   return (
-    <Link href={`/posts/${post.id}`}>
-      <article className={`bg-surface-container-low border rounded-xl p-md lg:p-lg hover:border-outline transition-all group block ${displayPost.is_archived ? "border-dashed border-outline-variant/60 opacity-70" : "border-outline-variant"}`}>
+    <div
+      onClick={() => router.push(`/posts/${post.id}`)}
+      className="cursor-pointer block"
+    >
+      <article className={`bg-surface-container-low border rounded-xl p-md lg:p-lg hover:border-outline transition-all group ${displayPost.is_archived ? "border-dashed border-outline-variant/60 opacity-70" : "border-outline-variant"}`}>
         {post.original_post && (
           <div className="flex items-center gap-xs text-on-surface-variant text-body-sm mb-sm px-2 font-medium">
             <span className="material-symbols-outlined text-[16px]">repeat</span>
@@ -207,6 +210,7 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
 
           <div className="relative">
             <button
+              type="button"
               className="text-on-surface-variant hover:text-on-surface transition-colors p-1 rounded-full hover:bg-surface-variant/40"
               onClick={(e) => {
                 e.preventDefault();
@@ -225,6 +229,7 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
               >
                 {canEditOrArchive && (
                   <button
+                    type="button"
                     onClick={handleEdit}
                     className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-on-surface hover:bg-surface-variant/40 transition-colors"
                   >
@@ -234,6 +239,7 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
                 )}
                 {canEditOrArchive && (
                   <button
+                    type="button"
                     onClick={handleToggleArchive}
                     disabled={isArchiving}
                     className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-on-surface hover:bg-surface-variant/40 transition-colors disabled:opacity-50"
@@ -246,6 +252,7 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
                 )}
                 {canManage && (
                   <button
+                    type="button"
                     onClick={handleDelete}
                     className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-error hover:bg-error-container/20 transition-colors"
                   >
@@ -255,6 +262,7 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
                 )}
                 {!isOriginalAuthor && (
                   <button
+                    type="button"
                     onClick={handleBlockAuthor}
                     className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 text-error hover:bg-error-container/20 transition-colors"
                   >
@@ -290,15 +298,17 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
               <span className="font-label-caps text-label-caps">{post.comments_count} <span className="hidden sm:inline">Comments</span></span>
             </div>
             <button
+              type="button"
               onClick={handleRepost}
-              className={`flex items-center gap-xs transition-colors ${isReposted ? 'text-[#00b894]' : 'text-on-surface-variant hover:text-[#00b894]'}`}
+              className={`flex items-center gap-xs transition-colors p-1.5 rounded-md hover:bg-white/5 ${isReposted ? 'text-[#00b894]' : 'text-on-surface-variant hover:text-[#00b894]'}`}
             >
               <span className="material-symbols-outlined text-[18px]">repeat</span>
               <span className="font-label-caps text-label-caps">Repost</span>
             </button>
             <button
+              type="button"
               onClick={handleLike}
-              className={`flex items-center gap-xs transition-colors ${isLiked ? 'text-[#ff4757]' : 'text-on-surface-variant hover:text-[#ff4757]'}`}
+              className={`flex items-center gap-xs transition-colors p-1.5 rounded-md hover:bg-white/5 ${isLiked ? 'text-[#ff4757]' : 'text-on-surface-variant hover:text-[#ff4757]'}`}
             >
               <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: isLiked ? "'FILL' 1" : "'FILL' 0" }}>favorite</span>
               <span className="font-label-caps text-label-caps">{likesCount} <span className="hidden sm:inline">Like</span></span>
@@ -309,6 +319,6 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
           </span>
         </div>
       </article>
-    </Link>
+    </div>
   );
 }
