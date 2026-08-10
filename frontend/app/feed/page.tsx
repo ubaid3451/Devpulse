@@ -183,7 +183,7 @@ export default function FeedPage() {
       </div>
 
       {/* Feed Content */}
-      <div className="flex-1 overflow-y-auto p-md lg:p-lg space-y-md">
+      <div className="flex-1 overflow-y-auto p-3 sm:p-md lg:p-lg space-y-3 sm:space-y-md">
         {loadingPosts ? (
           <div className="flex justify-center p-8">
             <span className="material-symbols-outlined animate-spin-slow text-primary text-4xl">progress_activity</span>

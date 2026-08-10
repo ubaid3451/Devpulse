@@ -119,7 +119,7 @@ export default function MyProfilePage() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto p-md lg:p-lg space-y-6">
+      <main className="max-w-2xl mx-auto p-3 sm:p-md lg:p-lg space-y-6 pb-16">
         {message && (
           <div className={`p-4 rounded-lg text-sm border ${message.includes("successfully") || message.includes("now private") || message.includes("now public") ? "bg-primary-container/20 text-primary border-primary/30" : "bg-error-container/20 text-error border-error/30"}`}>
             {message}

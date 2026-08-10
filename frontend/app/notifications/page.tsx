@@ -75,7 +75,7 @@ export default function NotificationsPage() {
           </div>
         </header>
 
-        <main className="max-w-2xl mx-auto p-md lg:p-lg">
+        <main className="max-w-2xl mx-auto p-3 sm:p-md lg:p-lg pb-16">
           <h2 className="text-title-lg font-bold text-on-surface mb-4">Follow Requests</h2>
 
           {loading ? (

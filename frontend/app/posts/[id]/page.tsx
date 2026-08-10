@@ -79,7 +79,7 @@ export default function PostDetailPage({ params }: { params: { id: string } }) {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto p-md lg:p-lg space-y-lg">
+      <main className="max-w-3xl mx-auto p-3 sm:p-md lg:p-lg space-y-md sm:space-y-lg pb-16">
         <PostCard post={post} onLikeToggle={fetchPost} />
 
         <div className="bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg">

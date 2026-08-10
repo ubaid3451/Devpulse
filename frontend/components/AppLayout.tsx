@@ -37,20 +37,27 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
   return (
     <div className="bg-surface text-on-surface min-h-screen select-none flex flex-col md:flex-row">
       {/* Mobile Top Bar */}
-      <header className="flex justify-between items-center w-full px-md h-16 sticky top-0 z-50 md:hidden bg-surface border-b border-outline-variant">
-        <div className="font-headline-md text-headline-md font-bold text-on-surface">
+      <header className="flex justify-between items-center w-full px-4 h-16 sticky top-0 z-50 md:hidden bg-surface border-b border-outline-variant">
+        <div className="font-headline-md text-headline-md font-bold text-on-surface truncate">
           DevPulse
         </div>
-        <div className="flex gap-4">
-          <span className="material-symbols-outlined text-primary">terminal</span>
-          <span className="material-symbols-outlined text-primary">bug_report</span>
-          <Link href={`/profile/${user?.username}`} className="w-8 h-8 rounded-full overflow-hidden bg-primary-container text-on-primary-container flex items-center justify-center font-bold border border-outline-variant uppercase hover:brightness-110 transition-all">
+        <div className="flex items-center gap-3 shrink-0">
+          <span className="material-symbols-outlined text-primary hidden sm:inline">terminal</span>
+          <span className="material-symbols-outlined text-primary hidden sm:inline">bug_report</span>
+          <Link href={`/profile/${user?.username}`} title="Profile" className="w-8 h-8 rounded-full overflow-hidden bg-primary-container text-on-primary-container flex items-center justify-center font-bold border border-outline-variant uppercase hover:brightness-110 transition-all shrink-0">
             {user?.avatar_url ? (
               <img src={user.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
             ) : (
               user?.username?.[0] || "U"
             )}
           </Link>
+          <button
+            onClick={handleLogout}
+            title="Sign Out"
+            className="p-1.5 text-error hover:bg-error-container/20 rounded-lg transition-colors flex items-center justify-center shrink-0"
+          >
+            <span className="material-symbols-outlined text-[22px]">logout</span>
+          </button>
         </div>
       </header>
 

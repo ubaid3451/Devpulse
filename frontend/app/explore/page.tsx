@@ -118,7 +118,7 @@ export default function ExplorePage() {
           </div>
         </header>
 
-        <main className="max-w-2xl mx-auto p-md lg:p-lg">
+        <main className="max-w-2xl mx-auto p-3 sm:p-md lg:p-lg pb-16">
           {initialLoad ? (
             <div className="flex items-center justify-center py-16">
               <span className="material-symbols-outlined animate-spin-slow text-primary text-4xl">progress_activity</span>

@@ -154,27 +154,27 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
             <span>Archived — only visible to you</span>
           </div>
         )}
-        <div className="flex justify-between items-start mb-md">
-          <div className="flex items-center gap-sm">
+        <div className="flex justify-between items-start mb-md gap-2">
+          <div className="flex items-center gap-sm min-w-0 flex-1">
             {displayPost.author.avatar_url ? (
-              <img src={displayPost.author.avatar_url} alt={displayPost.author.username} className="w-10 h-10 rounded-lg overflow-hidden border border-outline-variant object-cover" />
+              <img src={displayPost.author.avatar_url} alt={displayPost.author.username} className="w-10 h-10 rounded-lg overflow-hidden border border-outline-variant object-cover shrink-0" />
             ) : (
-              <div className="w-10 h-10 rounded-lg overflow-hidden border border-outline-variant bg-surface-container-highest flex items-center justify-center">
+              <div className="w-10 h-10 rounded-lg overflow-hidden border border-outline-variant bg-surface-container-highest flex items-center justify-center shrink-0">
                 <span className="text-on-surface font-bold">{avatarInitials}</span>
               </div>
             )}
-            <div>
-              <h3 className="font-headline-md text-headline-md text-on-surface group-hover:text-primary transition-colors">
+            <div className="min-w-0 flex-1">
+              <h3 className="font-headline-md text-headline-md text-on-surface group-hover:text-primary transition-colors truncate">
                 {displayPost.title}
               </h3>
-              <div className="flex gap-2 items-center mt-0.5">
+              <div className="flex gap-1.5 items-center mt-0.5 text-body-sm text-on-surface-variant truncate">
                 <span
-                  className="text-body-sm text-on-surface-variant hover:underline cursor-pointer"
+                  className="hover:underline cursor-pointer truncate"
                   onClick={handleGoToProfile}
                 >
                   @{displayPost.author.username}
                 </span>
-                <span className="text-body-sm text-on-surface-variant">
+                <span className="shrink-0">
                   • {formattedTime}
                 </span>
               </div>
@@ -259,11 +259,11 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
           </div>
         )}
 
-        <div className="flex items-center justify-between pt-md border-t border-outline-variant/30">
-          <div className="flex gap-lg">
+        <div className="flex flex-wrap items-center justify-between gap-y-3 gap-x-2 pt-md border-t border-outline-variant/30">
+          <div className="flex items-center gap-2 sm:gap-6 flex-wrap">
             <div className="flex items-center gap-xs text-on-surface-variant group-hover:text-primary transition-colors">
               <span className="material-symbols-outlined text-[18px]">forum</span>
-              <span className="font-label-caps text-label-caps">{post.comments_count} Comments</span>
+              <span className="font-label-caps text-label-caps">{post.comments_count} <span className="hidden sm:inline">Comments</span></span>
             </div>
             <button
               onClick={handleRepost}
@@ -277,10 +277,10 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
               className={`flex items-center gap-xs transition-colors ${displayPost.is_liked ? 'text-[#ff4757]' : 'text-on-surface-variant hover:text-[#ff4757]'}`}
             >
               <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: displayPost.is_liked ? "'FILL' 1" : "'FILL' 0" }}>favorite</span>
-              <span className="font-label-caps text-label-caps">{displayPost.likes_count} Like</span>
+              <span className="font-label-caps text-label-caps">{displayPost.likes_count} <span className="hidden sm:inline">Like</span></span>
             </button>
           </div>
-          <span className="px-md py-1.5 bg-secondary-container text-on-secondary-container text-body-sm font-semibold rounded-lg hover:bg-outline-variant transition-colors">
+          <span className="px-3 py-1.5 bg-secondary-container text-on-secondary-container text-body-sm font-semibold rounded-lg hover:bg-outline-variant transition-colors shrink-0">
             View Post
           </span>
         </div>
