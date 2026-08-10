@@ -22,7 +22,6 @@ import {
   hideConversation,
   markConversationRead,
 } from "@/lib/api";
-import { logEntry } from "@/lib/signal-e2ee";
 
 function ChatPageContent() {
   const router = useRouter();
@@ -263,7 +262,7 @@ function ChatPageContent() {
       // This prevents double-decryption on WebSocket reconnect/replay which
       // would advance the Double Ratchet twice on recipient but only once on sender
       if (processedMessageIds.current.has(msg.id)) {
-        logEntry("debug", "duplicate_message_skipped", { messageId: msg.id });
+        console.debug("[Signal:DEBUG] duplicate_message_skipped", { messageId: msg.id });
         return;
       }
       processedMessageIds.current.add(msg.id);
@@ -291,7 +290,7 @@ function ChatPageContent() {
           plaintextContent = plaintext;
           toAppend = { ...msg, content: plaintext };
         } catch (err) {
-          logEntry("error", "incoming_message_decrypt_failed", { messageId: msg.id, error: String(err) });
+          console.error("[Signal:ERROR] incoming_message_decrypt_failed", { messageId: msg.id, error: String(err) });
           plaintextContent = "[Unable to decrypt message]";
           toAppend = { ...msg, content: plaintextContent };
         }
@@ -396,7 +395,7 @@ function ChatPageContent() {
           pendingSentPlaintexts.current.push(plaintext);
           sendMessage(activeConversationId, content, imageUrl, msg_type);
         } catch (encryptErr) {
-          logEntry("warn", "encrypt_failed_fallback_plaintext", { otherUsername, error: String(encryptErr) });
+          console.warn("[Signal:WARN] encrypt_failed_fallback_plaintext", { otherUsername, error: String(encryptErr) });
           sendMessage(activeConversationId, plaintext, imageUrl);
         }
       } else {
@@ -407,7 +406,7 @@ function ChatPageContent() {
       setAttachedImage(null);
       setShowEmojiPicker(false);
     } catch (err) {
-      logEntry("error", "send_message_failed", { error: String(err) });
+      console.error("[Signal:ERROR] send_message_failed", { error: String(err) });
     } finally {
       setIsUploading(false);
     }

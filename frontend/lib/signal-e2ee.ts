@@ -108,7 +108,8 @@ const pendingSetups = new Map<string, Promise<void>>();
 
 // Per-conversation mutex for session establishment to prevent concurrent
 // X3DH handshakes from corrupting the initial session state.
-const sessionEstablishmentLocks = new Map<string, Promise<void>>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const sessionEstablishmentLocks = new Map<string, Promise<any>>();
 
 function getSessionLockKey(myUserId: string, username: string): string {
   return `${myUserId}:${username}`;
@@ -181,7 +182,11 @@ async function doEnsureIdentitySetUp(userId: string): Promise<void> {
   }
 
   const signedPreKeyId = 1;
-  const signedPreKey = await KeyHelper.generateSignedPreKey(identityKeyPair, signedPreKeyId);
+  // TypeScript narrowing: identityKeyPair is always set here — either loaded
+  // from the store (isNewIdentity=false path falls through only when SPK is
+  // missing, meaning identityKeyPair was not undefined) or freshly generated.
+  const keyPair = identityKeyPair!;
+  const signedPreKey = await KeyHelper.generateSignedPreKey(keyPair, signedPreKeyId);
   await store.storeSignedPreKey(signedPreKeyId, signedPreKey.keyPair);
 
   const oneTimePreKeys = [];
@@ -195,7 +200,7 @@ async function doEnsureIdentitySetUp(userId: string): Promise<void> {
   }
 
   await uploadKeyBundle({
-    identity_key: bufToBase64(identityKeyPair.pubKey),
+    identity_key: bufToBase64(keyPair.pubKey),
     signed_prekey: {
       keyId: signedPreKeyId,
       publicKey: bufToBase64(signedPreKey.keyPair.pubKey),

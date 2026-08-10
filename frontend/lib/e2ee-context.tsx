@@ -17,7 +17,7 @@ import { ensureIdentitySetUp, encryptForUser, decryptFromUser, forceSessionReset
 interface E2EEContextValue {
   isReady: boolean;
   encryptFor: (otherUsername: string, plaintext: string) => Promise<SignalEnvelope>;
-  decryptFrom: (otherUsername: string, envelope: SignalEnvelope) => Promise<string>;
+  decryptFrom: (otherUsername: string, envelope: SignalEnvelope, conversationId?: string) => Promise<string>;
   forceSessionReset: (otherUsername: string) => Promise<void>;
 }
 
@@ -53,9 +53,9 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
     return encryptForUser(user.id, otherUsername, plaintext);
   };
 
-  const decryptFrom = async (otherUsername: string, envelope: SignalEnvelope) => {
+  const decryptFrom = async (otherUsername: string, envelope: SignalEnvelope, conversationId?: string) => {
     if (!user) throw new Error("Not logged in");
-    return decryptFromUser(user.id, otherUsername, envelope);
+    return decryptFromUser(user.id, otherUsername, envelope, conversationId);
   };
 
   const handleForceSessionReset = async (otherUsername: string) => {
