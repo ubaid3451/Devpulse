@@ -31,6 +31,7 @@ from app.schemas.auth import (
     UserResponse,
 )
 from app.services import auth_service
+from app.services.e2ee_service import ensure_user_key_bundle
 from jose import JWTError
 from fastapi import Cookie, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -119,6 +120,8 @@ def verify_otp(payload: OTPVerifyRequest, response: Response, db: Session = Depe
         code=payload.code,
         db=db,
     )
+    # Automatically generate & persist Signal E2EE key bundle for new users
+    ensure_user_key_bundle(db, user)
     _set_auth_cookies(response, user.id, user.role)
     return {"message": "Email verified successfully.", "user": user}
 
@@ -184,6 +187,8 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
         password=payload.password,
         db=db,
     )
+    # Ensure user has E2EE keys (idempotent — no-op if already set)
+    ensure_user_key_bundle(db, user)
     _set_auth_cookies(response, user.id, user.role)
     return {"message": "Login successful.", "user": user}
 
@@ -280,7 +285,7 @@ async def auth_google(request: Request, db: Session = Depends(get_db)):
     provider_id = user_info.get("sub")
     
     user = auth_service.authenticate_oauth_user(email, full_name, "google", provider_id, db)
-    
+    ensure_user_key_bundle(db, user)
     response = RedirectResponse(url=f"{settings.frontend_url}/oauth-success")
     _set_auth_cookies(response, user.id, user.role)
     return response
@@ -324,7 +329,7 @@ async def auth_github(request: Request, db: Session = Depends(get_db)):
     provider_id = str(user_info.get("id"))
     
     user = auth_service.authenticate_oauth_user(email, full_name, "github", provider_id, db)
-    
+    ensure_user_key_bundle(db, user)
     response = RedirectResponse(url=f"{settings.frontend_url}/oauth-success")
     _set_auth_cookies(response, user.id, user.role)
     return response

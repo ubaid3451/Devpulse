@@ -350,9 +350,14 @@ function ChatPageContent() {
 
       if (otherUsername && e2eeReady && inputText.trim()) {
         const plaintext = inputText.trim();
-        const { content, msg_type } = await encryptFor(otherUsername, plaintext);
-        pendingSentPlaintexts.current.push(plaintext);
-        sendMessage(activeConversationId, content, imageUrl, msg_type);
+        try {
+          const { content, msg_type } = await encryptFor(otherUsername, plaintext);
+          pendingSentPlaintexts.current.push(plaintext);
+          sendMessage(activeConversationId, content, imageUrl, msg_type);
+        } catch (encryptErr) {
+          console.warn(`Fallback to plaintext send for ${otherUsername} (recipient key bundle not available):`, encryptErr);
+          sendMessage(activeConversationId, plaintext, imageUrl);
+        }
       } else {
         sendMessage(activeConversationId, inputText.trim(), imageUrl);
       }

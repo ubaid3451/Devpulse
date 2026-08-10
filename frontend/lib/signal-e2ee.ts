@@ -141,13 +141,17 @@ const KEY_BUNDLE_FETCH_RETRIES = 4;
 const KEY_BUNDLE_RETRY_BASE_DELAY_MS = 300;
 
 async function getKeyBundleWithRetry(username: string) {
-  let lastError: unknown;
+  let lastError: any;
 
   for (let attempt = 0; attempt <= KEY_BUNDLE_FETCH_RETRIES; attempt++) {
     try {
       return await getKeyBundle(username);
-    } catch (err) {
+    } catch (err: any) {
       lastError = err;
+      // Do not retry if the backend indicates key bundle was not found (404)
+      if (err?.status === 404 || err?.message?.includes("not found")) {
+        break;
+      }
       if (attempt === KEY_BUNDLE_FETCH_RETRIES) break;
       const delay = KEY_BUNDLE_RETRY_BASE_DELAY_MS * 2 ** attempt;
       console.warn(
