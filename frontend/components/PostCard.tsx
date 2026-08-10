@@ -45,7 +45,7 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
     setLikesCount(target.likes_count);
     setIsLiked(target.is_liked || false);
     setIsReposted(target.is_reposted || false);
-  }, [post]);
+  }, [post.id, post.original_post?.id]);
 
   const isReposter = user?.id === post.author_id;
   const isOriginalAuthor = user?.id === displayPost.author_id;
@@ -67,6 +67,9 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
       const res = await toggleLike(displayPost.id);
       setIsLiked(res.is_liked);
       setLikesCount(res.likes_count);
+      if (onLikeToggle) {
+        onLikeToggle();
+      }
     } catch (err) {
       setIsLiked(!newIsLiked);
       setLikesCount(likesCount);
