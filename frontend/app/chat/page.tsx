@@ -191,11 +191,6 @@ function ChatPageContent() {
         // every message that doesn't win the race.
         const decrypted: typeof history = [];
         for (const msg of history) {
-          if (!msg.msg_type) {
-            decrypted.push(msg);
-            continue;
-          }
-
           const cached = currentUser ? getCachedMessagePlaintext(currentUser.id, msg.id) : undefined;
           if (cached !== undefined) {
             decrypted.push({ ...msg, content: cached });
@@ -203,7 +198,12 @@ function ChatPageContent() {
           }
 
           if (msg.sender_id === currentUser?.id) {
-            decrypted.push({ ...msg, content: "[Sent from another device]" });
+            decrypted.push({ ...msg, content: msg.content || "[Sent from another device]" });
+            continue;
+          }
+
+          if (!msg.msg_type) {
+            decrypted.push(msg);
             continue;
           }
 
@@ -837,7 +837,11 @@ function ChatPageContent() {
                             {msg.image_url && (
                               <img src={msg.image_url} alt="Attachment" className="max-w-full rounded-lg mb-2 max-h-64 object-cover" />
                             )}
-                            {msg.content && <div className="whitespace-pre-wrap text-[15px] leading-relaxed">{msg.content}</div>}
+                            {msg.content ? (
+                              <div className="whitespace-pre-wrap text-[15px] leading-relaxed">{msg.content}</div>
+                            ) : !msg.image_url ? (
+                              <div className="whitespace-pre-wrap text-[15px] leading-relaxed opacity-75 italic">[Sent message]</div>
+                            ) : null}
                           </div>
                           {!isMine && (
                             <button
