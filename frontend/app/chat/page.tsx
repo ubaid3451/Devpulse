@@ -101,13 +101,15 @@ function ChatPageContent() {
         const previews: Record<string, string> = {};
         await Promise.all(
           convos.map(async (convo: ConversationResponse) => {
-            if (convo.is_group || !convo.last_message_encrypted || !convo.last_message_id) return;
+            if (convo.is_group || !convo.last_message_id) return;
 
             const cached = getCachedMessagePlaintext(currentUser.id, convo.last_message_id);
             if (cached !== undefined) {
               previews[convo.conversation_id] = cached;
               return;
             }
+
+            if (!convo.last_message_encrypted) return;
 
             const otherUsername = convo.participants[0]?.username;
             if (!otherUsername || !convo.last_message || convo.last_message_msg_type == null) return;
@@ -116,7 +118,7 @@ function ChatPageContent() {
             // another device — can't decrypt it here.
             const lastMessageSenderId = convo.last_message_sender_id;
             if (lastMessageSenderId === currentUser.id) {
-              previews[convo.conversation_id] = "[Sent from another device]";
+              previews[convo.conversation_id] = convo.last_message || "[Sent message]";
               return;
             }
 
@@ -635,9 +637,11 @@ function ChatPageContent() {
                             </div>
                           </div>
                           <div className="text-[13px] text-on-surface-variant truncate opacity-80">
-                            {conv.last_message_encrypted
-                              ? decryptedPreviews[conv.conversation_id] ?? "🔒 Encrypted message"
-                              : conv.last_message || "No messages yet"}
+                            {decryptedPreviews[conv.conversation_id]
+                              ? decryptedPreviews[conv.conversation_id]
+                              : conv.last_message_encrypted
+                              ? "🔒 Encrypted message"
+                              : conv.last_message || (conv.last_message_id ? "[Message]" : "No messages yet")}
                           </div>
                         </div>
                         {(conv.unread_count ?? 0) > 0 && (

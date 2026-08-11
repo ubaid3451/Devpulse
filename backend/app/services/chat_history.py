@@ -82,6 +82,35 @@ def get_conversations(db: Session, current_user: User) -> List[dict]:
             )
         ) or 0
 
+        last_message_content = last_message.content if last_message else None
+        last_message_msg_type = last_message.msg_type if last_message else None
+        last_message_sender_id = last_message.sender_id if last_message else None
+        is_encrypted = bool(last_message and last_message.msg_type)
+
+        if last_message and not is_encrypted:
+            # Check if multi-device MessageCiphertext exists for this last message
+            from app.models.message_ciphertext import MessageCiphertext
+            ct = db.execute(
+                select(MessageCiphertext).where(
+                    MessageCiphertext.message_id == last_message.id,
+                    MessageCiphertext.recipient_user_id == current_user.id,
+                ).limit(1)
+            ).scalar_one_or_none()
+
+            if ct:
+                last_message_content = ct.content
+                last_message_msg_type = ct.msg_type
+                is_encrypted = True
+            else:
+                has_any_ct = db.execute(
+                    select(MessageCiphertext.id).where(
+                        MessageCiphertext.message_id == last_message.id
+                    ).limit(1)
+                ).scalar_one_or_none()
+                if has_any_ct:
+                    is_encrypted = True
+                    last_message_msg_type = 1
+
         result.append({
             "conversation_id": convo.id,
             "is_group": convo.is_group,
@@ -97,10 +126,11 @@ def get_conversations(db: Session, current_user: User) -> List[dict]:
             ],
             "is_blocked": is_blocked,
             "unread_count": unread_count,
-            "last_message": last_message.content if last_message else None,
+            "last_message": last_message_content,
             "last_message_id": last_message.id if last_message else None,
-            "last_message_msg_type": last_message.msg_type if last_message else None,
-            "last_message_encrypted": bool(last_message and last_message.msg_type),
+            "last_message_sender_id": last_message_sender_id,
+            "last_message_msg_type": last_message_msg_type,
+            "last_message_encrypted": is_encrypted,
             "last_message_at": last_message.created_at if last_message else convo.created_at,
         })
 
