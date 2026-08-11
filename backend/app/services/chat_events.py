@@ -164,10 +164,18 @@ async def handle_chat_message_event(db: Session, user: User, data: dict, sender_
     db.flush()  # get new_msg.id without committing yet
 
     ciphertext_rows = []
+    # Build a lookup map of user.id and user.username to user.id UUID
+    participants = db.execute(
+        select(User).where(User.id.in_(_participant_ids(db, conversation_id)))
+    ).scalars().all()
+    user_id_map = {u.id: u.id for u in participants}
+    user_id_map.update({u.username: u.id for u in participants})
+
     for ct in ciphertexts_in:
+        target_uid = user_id_map.get(ct["recipient_user_id"], ct["recipient_user_id"])
         row = MessageCiphertext(
             message_id=new_msg.id,
-            recipient_user_id=ct["recipient_user_id"],
+            recipient_user_id=target_uid,
             recipient_device_id=ct["recipient_device_id"],
             content=ct["content"],
             msg_type=ct["msg_type"],

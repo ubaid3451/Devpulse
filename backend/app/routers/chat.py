@@ -188,7 +188,7 @@ def get_key_bundles(user_id_or_username: str, current_user: CurrentUser, db: Ses
     if not bundles:
         raise HTTPException(status_code=404, detail="No key bundles found for this user")
 
-    return {"devices": bundles}
+    return {"user_id": user.id, "devices": bundles}
 
 
 

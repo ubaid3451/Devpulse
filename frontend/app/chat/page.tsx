@@ -423,6 +423,11 @@ function ChatPageContent() {
           // encryptFor returns one DeviceCiphertext per active device of the
           // recipient + one per each of our own other devices (sync copies).
           const ciphertexts = await encryptFor(otherUsername, plaintext);
+          if (!ciphertexts || ciphertexts.length === 0) {
+            console.warn("[Signal:WARN] no_recipient_devices", { otherUsername });
+            alert(`Couldn't send message: @${otherUsername} has not set up E2EE keys on the server yet. Ask them to log in to enable E2EE.`);
+            return;
+          }
           pendingSentPlaintexts.current.push(plaintext);
           sendMessage(activeConversationId, ciphertexts, imageUrl);
         } catch (encryptErr) {
@@ -430,6 +435,7 @@ function ChatPageContent() {
           // Don't silently send plaintext — surface the error so the user
           // knows the message wasn't sent rather than being sent unencrypted.
           alert("Couldn't send message securely. Please try again.");
+          return;
         }
       } else if (!otherUsername) {
         // Group chat — not E2EE yet, falls back to unencrypted server-side.

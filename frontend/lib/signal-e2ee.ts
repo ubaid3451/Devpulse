@@ -290,7 +290,11 @@ async function getDeviceBundlesWithRetry(username: string, forceRefresh = false)
   for (let attempt = 0; attempt <= KEY_BUNDLE_FETCH_RETRIES; attempt++) {
     try {
       const res = await getKeyBundles(username);
-      const bundles = res.devices as RemoteDeviceBundle[];
+      const targetUserId = (res as any)?.user_id || username;
+      const bundles = (res.devices || []).map((d: any) => ({
+        ...d,
+        recipient_user_id: targetUserId,
+      })) as RemoteDeviceBundle[];
       deviceBundleCache.set(username, { bundles, fetchedAt: now });
       return bundles;
     } catch (err: any) {
@@ -442,7 +446,8 @@ export async function encryptForUser(
 
   for (const bundle of theirBundles) {
     const envelope = await encryptToDevice(myUserId, username, plaintext, bundle);
-    results.push({ ...envelope, recipient_user_id: username, recipient_device_id: bundle.device_id });
+    const recipientUserId = (bundle as any).recipient_user_id || username;
+    results.push({ ...envelope, recipient_user_id: recipientUserId, recipient_device_id: bundle.device_id });
   }
 
   // Sync copies to my other devices (skip the device I'm sending FROM).
