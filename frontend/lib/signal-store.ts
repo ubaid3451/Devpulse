@@ -75,7 +75,21 @@ async function idbRemove(userId: string, key: string): Promise<void> {
 }
 
 export class SignalProtocolStore {
-  constructor(private userId: string) {}
+  constructor(private userId: string) { }
+
+  // ── This browser's device id ─────────────────────────────────────────
+  // Persisted once, on first setup, and reused on every subsequent login
+  // from this same browser. The backend assigns the number (see
+  // ensureIdentitySetUp) — this just remembers it locally so the same
+  // browser doesn't register as a "new device" every time someone logs in.
+
+  async getLocalDeviceId(): Promise<number | undefined> {
+    return idbGet<number>(this.userId, "localDeviceId");
+  }
+
+  async setLocalDeviceId(deviceId: number): Promise<void> {
+    await idbSet(this.userId, "localDeviceId", deviceId);
+  }
 
   // ── Identity ──────────────────────────────────────────────────────────
 

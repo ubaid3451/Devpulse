@@ -244,6 +244,7 @@ export interface ChatMessageResponse {
   id: string;
   conversation_id: string;
   sender_id: string;
+  sender_device_id?: number;  // which of the sender's devices produced this ciphertext
   content?: string | null;
   ciphertext?: string;
   iv?: string;
@@ -330,11 +331,11 @@ export interface AdminPermissionOut {
 }
 
 export const ALL_PERMISSIONS = [
-  { key: "view_stats",   label: "View Dashboard Stats" },
-  { key: "view_users",   label: "View Users" },
+  { key: "view_stats", label: "View Dashboard Stats" },
+  { key: "view_users", label: "View Users" },
   { key: "manage_users", label: "Manage Users (block/unblock/promote)" },
-  { key: "view_posts",   label: "View Posts" },
-  { key: "edit_posts",   label: "Edit Posts (archive/unarchive/edit)" },
+  { key: "view_posts", label: "View Posts" },
+  { key: "edit_posts", label: "Edit Posts (archive/unarchive/edit)" },
   { key: "delete_posts", label: "Delete Posts" },
 ] as const;
 
@@ -487,12 +488,21 @@ export async function addComment(postId: string, content: string): Promise<Comme
 
 // ── Chat & E2EE API Functions ─────────────────────────────────────────────────
 
-export async function getConversations(): Promise<ConversationResponse[]> {
-  return apiGet<ConversationResponse[]>("/chat/conversations");
+export async function getConversations(deviceId?: number): Promise<ConversationResponse[]> {
+  return apiGet<ConversationResponse[]>("/chat/conversations", deviceId !== undefined ? { device_id: deviceId } : undefined);
 }
 
-export async function getChatHistory(conversationId: string, limit = 50, before?: string): Promise<ChatMessageResponse[]> {
-  return apiGet<ChatMessageResponse[]>(`/chat/${conversationId}`, { limit, before });
+export async function getChatHistory(
+  conversationId: string,
+  limit = 50,
+  before?: string,
+  deviceId?: number
+): Promise<ChatMessageResponse[]> {
+  return apiGet<ChatMessageResponse[]>(`/chat/${conversationId}`, {
+    limit,
+    before,
+    ...(deviceId !== undefined ? { device_id: deviceId } : {}),
+  });
 }
 
 export async function startDirectConversation(recipientUsername: string): Promise<ConversationResponse> {
@@ -532,12 +542,15 @@ export async function uploadChatImage(fileOrFormData: File | FormData): Promise<
   return apiPost<{ image_url: string }>("/chat/upload_image", formData);
 }
 
-export async function uploadKeyBundle(bundle: any): Promise<{ message: string }> {
-  return apiPost<{ message: string }>("/chat/keys", bundle);
+export async function uploadKeyBundle(bundle: any): Promise<{ message: string; device_id: number }> {
+  return apiPost<{ message: string; device_id: number }>("/chat/keys", bundle);
 }
 
-export async function getKeyBundle(userId: string): Promise<any> {
-  return apiGet<any>(`/chat/keys/${userId}`);
+// Returns { devices: [{ device_id, identity_key, registration_id, signed_prekey, one_time_prekey }, ...] }
+// — one bundle per active device of that user, needed to encrypt to all of
+// their logged-in devices (multi-device support).
+export async function getKeyBundles(userId: string): Promise<{ devices: any[] }> {
+  return apiGet<{ devices: any[] }>(`/chat/keys/${userId}`);
 }
 
 // ── Admin API Functions ───────────────────────────────────────────────────────
@@ -591,4 +604,4 @@ export async function updateAdminUserPermissions(userId: string, permissions: st
     throw new Error(err?.detail || "Failed to update permissions");
   }
   return res.json();
-}
+}

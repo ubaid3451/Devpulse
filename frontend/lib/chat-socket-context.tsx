@@ -1,20 +1,26 @@
 "use client";
 
 /**
- * ChatSocketProvider
+ * ChatSocketProvider — MULTI-DEVICE version
  * ───────────────────
  * Owns ONE WebSocket connection for the entire app, opened once when the
  * user is authenticated and kept alive across route changes.
  *
- * NOTE ON DESKTOP NOTIFICATIONS: this context deliberately does NOT trigger
- * desktop notifications, even though it's tempting to do so right here where
- * every message arrives. The reason: for E2EE conversations, `chatMsg.content`
- * at this layer is still base64 CIPHERTEXT — this context has no access to
- * the Signal Protocol session state needed to decrypt it (that lives in
- * chat/page.tsx via useE2EE()). Notifying from here would show raw
- * gibberish instead of the actual message. Desktop notifications are
- * triggered from chat/page.tsx's onChatMessage subscriber instead, AFTER
- * decryption has produced real plaintext.
+ * MULTI-DEVICE CHANGE: the socket URL now includes this browser's Signal
+ * Protocol device id (?device_id=N) so the backend can route per-device
+ * ciphertexts to the correct connection (see connection_manager.py). The
+ * device id comes from IndexedDB via signal-e2ee's ensureIdentitySetUp,
+ * which must have already run (E2EEProvider does this) before this
+ * connects — if it hasn't finished yet, we fall back to device_id=1 and
+ * the socket will simply reconnect with the correct id once available.
+ *
+ * `sendMessage` now takes an array of per-recipient-device ciphertexts
+ * (produced by encryptForUser in signal-e2ee.ts) instead of a single
+ * content/msg_type pair — the server needs one ciphertext per device to
+ * fan out correctly.
+ *
+ * NOTE ON DESKTOP NOTIFICATIONS: unchanged — see chat/page.tsx for why
+ * notifications aren't triggered from this layer.
  */
 
 import React, {
@@ -36,6 +42,7 @@ interface PresenceEvent {
 
 interface ChatMessageEvent extends ChatMessageResponse {
   type: "chat_message";
+  sender_device_id?: number;
 }
 
 interface ReactionUpdateEvent {
@@ -59,17 +66,26 @@ interface SessionResetEvent {
 
 type IncomingEvent = PresenceEvent | ChatMessageEvent | ReactionUpdateEvent | MessagesReadEvent | SessionResetEvent;
 
+export interface OutgoingDeviceCiphertext {
+  recipient_user_id: string;
+  recipient_device_id: number;
+  content: string;
+  msg_type: number;
+}
+
 interface ChatSocketContextValue {
   isConnected: boolean;
   onlineUsers: Set<string>;
+  /** ciphertexts: one entry per recipient device (including sender's own other devices).
+   *  content: plaintext for group/non-E2EE messages (only used when ciphertexts is empty). */
   sendMessage: (
     conversationId: string,
-    content: string,
+    ciphertexts: OutgoingDeviceCiphertext[],
     imageUrl?: string | null,
-    msgType?: number | null
+    content?: string | null
   ) => void;
   sendReaction: (messageId: string, emoji: string) => void;
-  onChatMessage: (handler: (msg: ChatMessageResponse) => void) => () => void;
+  onChatMessage: (handler: (msg: ChatMessageEvent) => void) => () => void;
   onReactionUpdate: (handler: (msg: ReactionUpdateEvent) => void) => () => void;
   onMessagesRead: (handler: (event: MessagesReadEvent) => void) => () => void;
   onSessionReset: (handler: (event: SessionResetEvent) => void) => () => void;
@@ -78,6 +94,38 @@ interface ChatSocketContextValue {
 const ChatSocketContext = createContext<ChatSocketContextValue | null>(null);
 
 const RECONNECT_DELAY_MS = 2000;
+
+function dbNameForDeviceLookup(userId: string): string {
+  return `devpulse_signal_store_${userId}`;
+}
+
+/** Reads this browser's registered device id straight out of IndexedDB
+ *  (mirrors SignalProtocolStore.getLocalDeviceId, kept independent here to
+ *  avoid a circular import between chat-socket-context and signal-e2ee). */
+function getLocalDeviceId(userId: string): Promise<number> {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(dbNameForDeviceLookup(userId), 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("kv")) {
+          resolve(1);
+          return;
+        }
+        const tx = db.transaction("kv", "readonly");
+        const getReq = tx.objectStore("kv").get("localDeviceId");
+        getReq.onsuccess = () => resolve(typeof getReq.result === "number" ? getReq.result : 1);
+        getReq.onerror = () => resolve(1);
+      };
+      req.onerror = () => resolve(1);
+      req.onupgradeneeded = () => {
+        // DB didn't exist yet — nothing to read.
+      };
+    } catch {
+      resolve(1);
+    }
+  });
+}
 
 export function ChatSocketProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -88,12 +136,12 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
   const [isConnected, setIsConnected] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
 
-  const chatMessageHandlers = useRef(new Set<(msg: ChatMessageResponse) => void>());
+  const chatMessageHandlers = useRef(new Set<(msg: ChatMessageEvent) => void>());
   const reactionHandlers = useRef(new Set<(msg: ReactionUpdateEvent) => void>());
   const messagesReadHandlers = useRef(new Set<(event: MessagesReadEvent) => void>());
   const sessionResetHandlers = useRef(new Set<(event: SessionResetEvent) => void>());
 
-  const connect = useCallback(() => {
+  const connect = useCallback(async () => {
     if (!user) return;
     if (socketRef.current && socketRef.current.readyState <= WebSocket.OPEN) return;
 
@@ -104,7 +152,13 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
       "wss://13.126.205.138.nip.io";
     const wsUrl = baseApi.replace(/\/$/, "");
     const token = localStorage.getItem("devpulse_access_token") || "";
-    const socket = new WebSocket(`${wsUrl}/chat/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`);
+    const deviceId = await getLocalDeviceId(user.id);
+
+    const params = new URLSearchParams();
+    if (token) params.set("token", token);
+    params.set("device_id", String(deviceId));
+
+    const socket = new WebSocket(`${wsUrl}/chat/ws?${params.toString()}`);
 
     socket.onopen = () => setIsConnected(true);
 
@@ -137,10 +191,11 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
         });
       } else if (data.type === "chat_message") {
         const { type, ...msg } = data;
-        const chatMsg = msg as ChatMessageResponse;
         // Just relay it — decryption + desktop notifications happen
         // downstream in chat/page.tsx where the E2EE session state lives.
-        chatMessageHandlers.current.forEach((h) => h(chatMsg));
+        // msg.sender_device_id tells the decrypt layer WHICH of the
+        // sender's devices' sessions to use.
+        chatMessageHandlers.current.forEach((h) => h(data as ChatMessageEvent));
       } else if (data.type === "reaction_update") {
         reactionHandlers.current.forEach((h) => h(data));
       } else if (data.type === "messages_read") {
@@ -176,13 +231,15 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
   }, [user?.id]);
 
   const sendMessage = useCallback(
-    (conversationId: string, content: string, imageUrl?: string | null, msgType?: number | null) => {
+    (conversationId: string, ciphertexts: OutgoingDeviceCiphertext[], imageUrl?: string | null, content?: string | null) => {
       socketRef.current?.send(
         JSON.stringify({
           conversation_id: conversationId,
-          content,
+          ciphertexts,
+          // content is only used by the backend legacy path (when ciphertexts is empty)
+          // e.g. group chats, image-only messages, or non-E2EE conversations.
+          content: content ?? null,
           image_url: imageUrl ?? null,
-          msg_type: msgType ?? null,
         })
       );
     },
@@ -195,7 +252,7 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
     );
   }, []);
 
-  const onChatMessage = useCallback((handler: (msg: ChatMessageResponse) => void) => {
+  const onChatMessage = useCallback((handler: (msg: ChatMessageEvent) => void) => {
     chatMessageHandlers.current.add(handler);
     return () => {
       chatMessageHandlers.current.delete(handler);

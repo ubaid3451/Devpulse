@@ -1,14 +1,25 @@
 "use client";
 
 /**
- * Signal Protocol client-side logic:
- * - First-run: generate identity key, registration id, signed pre-key, and
- *   a batch of one-time pre-keys; upload the public bundle to the backend.
- * - Sending a first message to someone: fetch their PreKeyBundle (X3DH),
- *   build a session via SessionBuilder.
- * - Sending/receiving: SessionCipher handles the Double Ratchet automatically
- *   once a session exists — every call advances the ratchet state, which
- *   SignalProtocolStore persists to IndexedDB.
+ * Signal Protocol client-side logic — MULTI-DEVICE version.
+ *
+ * Key change from the single-device version: SignalProtocolAddress is now
+ * (username, deviceId) for real, instead of a hardcoded deviceId=1. That
+ * means:
+ *
+ * - This browser registers itself as one numbered "device" for the logged
+ *   in user (assigned by the backend on first setup, persisted locally
+ *   after that — see SignalProtocolStore.getLocalDeviceId).
+ * - Encrypting a message to someone now means: look up ALL of their active
+ *   devices, maintain a separate Double Ratchet session with EACH one, and
+ *   produce one ciphertext per device. There is no single ciphertext a
+ *   user's multiple devices could jointly decrypt — every device has its
+ *   own independent session.
+ * - You also encrypt a copy to your OWN other devices, so a message you
+ *   send from your phone shows up in your laptop's chat too (Signal calls
+ *   these "sync messages").
+ * - Decrypting now addresses sessions by the SENDER's specific device id
+ *   (included in the envelope), not just their username.
  */
 
 import {
@@ -18,9 +29,8 @@ import {
   SignalProtocolAddress,
 } from "@privacyresearch/libsignal-protocol-typescript";
 import { SignalProtocolStore } from "./signal-store";
-import { uploadKeyBundle, getKeyBundle, notifySessionReset } from "./api";
+import { uploadKeyBundle, getKeyBundles, notifySessionReset } from "./api";
 
-const DEVICE_ID = 1; // single-device scope for this project
 const ONE_TIME_PREKEY_BATCH_SIZE = 20;
 
 // ── Structured logging ────────────────────────────────────────────────────
@@ -43,7 +53,6 @@ function logEntry(level: LogLevel, event: string, details: LogEntry["details"] =
     event,
     ...details,
   };
-  // In production, replace with your logging service (e.g., sentry, datadog, custom endpoint)
   const prefix = `[Signal:${level.toUpperCase()}]`;
   switch (level) {
     case "debug":
@@ -86,9 +95,7 @@ function base64ToBuf(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-// The store is scoped per logged-in user id (see signal-store.ts) — this
-// avoids two different accounts in the same browser silently sharing/
-// overwriting each other's Signal Protocol identity and session state.
+// The store is scoped per logged-in user id (see signal-store.ts).
 let store: SignalProtocolStore | null = null;
 let storeUserId: string | null = null;
 
@@ -100,27 +107,30 @@ function getStore(userId: string): SignalProtocolStore {
   return store;
 }
 
-// Tracks in-flight setup calls per user so concurrent invocations (e.g. the
-// auth effect firing twice in React StrictMode, or multiple tabs/components
-// reacting to the same login) await the same promise instead of racing to
-// generate/upload two different identities for the same user.
+// This browser's device id for the currently logged-in user, cached in
+// memory after first load/registration so callers don't have to await
+// IndexedDB on every encrypt/decrypt call.
+const localDeviceIdCache = new Map<string, number>();
+
+async function getLocalDeviceId(userId: string): Promise<number | undefined> {
+  if (localDeviceIdCache.has(userId)) return localDeviceIdCache.get(userId);
+  const s = getStore(userId);
+  const id = await s.getLocalDeviceId();
+  if (id !== undefined) localDeviceIdCache.set(userId, id);
+  return id;
+}
+
 const pendingSetups = new Map<string, Promise<void>>();
 
-// Per-conversation mutex for session establishment to prevent concurrent
-// X3DH handshakes from corrupting the initial session state.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sessionEstablishmentLocks = new Map<string, Promise<any>>();
 
-function getSessionLockKey(myUserId: string, username: string): string {
-  return `${myUserId}:${username}`;
+function getSessionLockKey(myUserId: string, addressStr: string): string {
+  return `${myUserId}:${addressStr}`;
 }
 
-async function withSessionLock<T>(
-  myUserId: string,
-  username: string,
-  fn: () => Promise<T>
-): Promise<T> {
-  const lockKey = getSessionLockKey(myUserId, username);
+async function withSessionLock<T>(myUserId: string, addressStr: string, fn: () => Promise<T>): Promise<T> {
+  const lockKey = getSessionLockKey(myUserId, addressStr);
   const existingLock = sessionEstablishmentLocks.get(lockKey);
   if (existingLock) {
     await existingLock;
@@ -133,12 +143,11 @@ async function withSessionLock<T>(
 }
 
 /**
- * Ensures this browser has a Signal Protocol identity set up for `userId`,
- * generating one (and uploading the public bundle) if this is the first
- * time. Safe to call on every login — it's a no-op after the first
- * successful run for that user. Safe to call concurrently for the same
- * user — only one initialization will actually run; other callers await
- * the same in-flight promise.
+ * Ensures this browser has a Signal Protocol identity + device registration
+ * set up for `userId`. Safe to call on every login. On the FIRST call ever
+ * for this browser+user, this also registers a new numbered device with the
+ * backend and remembers the assigned device id locally; subsequent calls
+ * reuse that same device id and just refresh prekeys if needed.
  */
 export async function ensureIdentitySetUp(userId: string): Promise<void> {
   const existingCall = pendingSetups.get(userId);
@@ -158,6 +167,7 @@ async function doEnsureIdentitySetUp(userId: string): Promise<void> {
 
   let identityKeyPair = await store.getIdentityKeyPair();
   let registrationId = await store.getLocalRegistrationId();
+  let localDeviceId = await store.getLocalDeviceId();
 
   const isNewIdentity = !identityKeyPair || !registrationId;
 
@@ -169,22 +179,18 @@ async function doEnsureIdentitySetUp(userId: string): Promise<void> {
     await store.setIdentityKeyPair(identityKeyPair);
     await store.setLocalRegistrationId(registrationId);
     logEntry("info", "identity_stored", { userId });
-  } else {
-    // BUG FIX: Only skip key upload if signed prekey already stored locally.
-    // Previously, this block fell through and re-generated+uploaded signed prekeys
-    // on EVERY login, invalidating all existing sessions for every peer.
+  } else if (localDeviceId !== undefined) {
+    // Already fully set up on this browser (identity + registered device id
+    // + prekeys uploaded at least once). Only skip if signed prekey exists.
     const existingSignedPreKey = await store.loadSignedPreKey(1);
     if (existingSignedPreKey) {
-      logEntry("info", "identity_already_exists_skipping_upload", { userId });
+      logEntry("info", "identity_already_exists_skipping_upload", { userId, localDeviceId });
+      localDeviceIdCache.set(userId, localDeviceId);
       return;
     }
-    logEntry("info", "identity_exists_but_prekeys_missing_reuploading", { userId });
   }
 
   const signedPreKeyId = 1;
-  // TypeScript narrowing: identityKeyPair is always set here — either loaded
-  // from the store (isNewIdentity=false path falls through only when SPK is
-  // missing, meaning identityKeyPair was not undefined) or freshly generated.
   const keyPair = identityKeyPair!;
   const signedPreKey = await KeyHelper.generateSignedPreKey(keyPair, signedPreKeyId);
   await store.storeSignedPreKey(signedPreKeyId, signedPreKey.keyPair);
@@ -199,8 +205,13 @@ async function doEnsureIdentitySetUp(userId: string): Promise<void> {
     });
   }
 
-  await uploadKeyBundle({
+  const deviceName = typeof navigator !== "undefined" ? guessDeviceName() : undefined;
+
+  const result = await uploadKeyBundle({
+    device_id: localDeviceId ?? null,
+    device_name: deviceName,
     identity_key: bufToBase64(keyPair.pubKey),
+    registration_id: registrationId,
     signed_prekey: {
       keyId: signedPreKeyId,
       publicKey: bufToBase64(signedPreKey.keyPair.pubKey),
@@ -208,38 +219,64 @@ async function doEnsureIdentitySetUp(userId: string): Promise<void> {
     },
     one_time_prekeys: oneTimePreKeys,
   });
-  logEntry("info", "identity_key_bundle_uploaded", { userId, oneTimePreKeyCount: oneTimePreKeys.length });
+
+  // Backend assigns/confirms this browser's device id — persist it so
+  // future logins from this browser reuse the same device instead of
+  // registering a new one every time.
+  if (result?.device_id !== undefined) {
+    await store.setLocalDeviceId(result.device_id);
+    localDeviceIdCache.set(userId, result.device_id);
+  }
+
+  logEntry("info", "identity_key_bundle_uploaded", {
+    userId,
+    deviceId: result?.device_id,
+    oneTimePreKeyCount: oneTimePreKeys.length,
+  });
 }
 
-function addressFor(username: string): SignalProtocolAddress {
-  return new SignalProtocolAddress(username, DEVICE_ID);
+function guessDeviceName(): string {
+  const ua = navigator.userAgent;
+  const browser = /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Browser";
+  const os = /Windows/.test(ua) ? "Windows" : /Mac OS/.test(ua) ? "macOS" : /Android/.test(ua) ? "Android" : /iPhone|iPad/.test(ua) ? "iOS" : /Linux/.test(ua) ? "Linux" : "";
+  return os ? `${browser} on ${os}` : browser;
+}
+
+function addressFor(username: string, deviceId: number): SignalProtocolAddress {
+  return new SignalProtocolAddress(username, deviceId);
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Fetching a recipient's key bundle can race a backend that just finished
-// uploading it (e.g. the recipient's very first login) or a DB replica that
-// hasn't caught up yet. Retry a few times with backoff before giving up.
 const KEY_BUNDLE_FETCH_RETRIES = 4;
 const KEY_BUNDLE_RETRY_BASE_DELAY_MS = 300;
 
-async function getKeyBundleWithRetry(username: string) {
+interface RemoteDeviceBundle {
+  device_id: number;
+  identity_key: string;
+  registration_id: number;
+  signed_prekey: { key_id: number; public_key: string; signature: string };
+  one_time_prekey: { key_id: number; public_key: string } | null;
+}
+
+/** Fetches every active device bundle for `username` (retries on transient errors). */
+async function getDeviceBundlesWithRetry(username: string): Promise<RemoteDeviceBundle[]> {
   let lastError: any;
 
   for (let attempt = 0; attempt <= KEY_BUNDLE_FETCH_RETRIES; attempt++) {
     try {
-      return await getKeyBundle(username);
+      const res = await getKeyBundles(username);
+      return res.devices as RemoteDeviceBundle[];
     } catch (err: any) {
       lastError = err;
-      // Do not retry if the backend indicates key bundle was not found (404)
       if (err?.status === 404 || err?.message?.includes("not found")) {
         break;
       }
       if (attempt === KEY_BUNDLE_FETCH_RETRIES) break;
       const delay = KEY_BUNDLE_RETRY_BASE_DELAY_MS * 2 ** attempt;
-      logEntry("warn", "key_bundle_fetch_retry", { username, attempt: attempt + 1, maxAttempts: KEY_BUNDLE_FETCH_RETRIES + 1, delay, error: String(err) });
+      logEntry("warn", "key_bundle_fetch_retry", { username, attempt: attempt + 1, delay, error: String(err) });
       await sleep(delay);
     }
   }
@@ -247,31 +284,30 @@ async function getKeyBundleWithRetry(username: string) {
   throw lastError;
 }
 
-/** Builds a session with `username` via X3DH if one doesn't already exist. */
-async function ensureSessionWith(myUserId: string, username: string, forceRefresh = false): Promise<void> {
+/** Builds a session with `username`'s specific device if one doesn't already exist. */
+async function ensureSessionWithDevice(
+  myUserId: string,
+  username: string,
+  bundle: RemoteDeviceBundle,
+  forceRefresh = false
+): Promise<void> {
   const store = getStore(myUserId);
-  const address = addressFor(username);
+  const address = addressFor(username, bundle.device_id);
   const addressStr = address.toString();
 
-  logEntry("debug", "ensure_session_started", { myUserId, username, forceRefresh });
-
-  // Use per-conversation mutex to prevent concurrent session establishment
-  await withSessionLock(myUserId, username, async () => {
-    // Re-check after acquiring lock in case another caller already created the session
+  await withSessionLock(myUserId, addressStr, async () => {
     if (!forceRefresh) {
       const existingSession = await store.loadSession(addressStr);
       if (existingSession) {
-        logEntry("debug", "session_already_exists", { myUserId, username });
+        logEntry("debug", "session_already_exists", { myUserId, username, deviceId: bundle.device_id });
         return;
       }
     } else {
-      logEntry("info", "session_force_refresh", { myUserId, username });
+      logEntry("info", "session_force_refresh", { myUserId, username, deviceId: bundle.device_id });
       await store.removeSession(addressStr);
     }
 
-    logEntry("info", "session_building_x3dh", { myUserId, username });
-
-    const bundle = await getKeyBundleWithRetry(username);
+    logEntry("info", "session_building_x3dh", { myUserId, username, deviceId: bundle.device_id });
 
     const preKeyBundle: any = {
       identityKey: base64ToBuf(bundle.identity_key),
@@ -292,32 +328,35 @@ async function ensureSessionWith(myUserId: string, username: string, forceRefres
     const sessionBuilder = new SessionBuilder(store as any, address);
     await sessionBuilder.processPreKey(preKeyBundle);
 
-    logEntry("info", "session_created", { myUserId, username });
+    logEntry("info", "session_created", { myUserId, username, deviceId: bundle.device_id });
   });
 }
 
 export interface SignalEnvelope {
   content: string; // base64 ciphertext body
-  msg_type: number; // 3 = PreKeyWhisperMessage (first msg), 1 = WhisperMessage (subsequent)
+  msg_type: number; // 3 = PreKeyWhisperMessage (first msg to this device), 1 = WhisperMessage (subsequent)
 }
 
-/** Encrypts plaintext to send to `username`, establishing a session first if needed. */
-export async function encryptForUser(myUserId: string, username: string, plaintext: string): Promise<SignalEnvelope> {
-  const store = getStore(myUserId);
-  const address = addressFor(username);
+/** One encrypted copy targeted at a specific recipient device. */
+export interface DeviceCiphertext extends SignalEnvelope {
+  recipient_user_id: string;
+  recipient_device_id: number;
+}
 
-  // BUG FIX: Do NOT wrap this in withSessionLock — ensureSessionWith already
-  // acquires the per-conversation lock internally. Nesting two withSessionLock
-  // calls for the same key creates a deadlock: the outer lock's fn() awaits
-  // ensureSessionWith(), which in turn tries to await the outer lock's promise
-  // before creating its own — neither can ever resolve.
+async function encryptToDevice(
+  myUserId: string,
+  username: string,
+  plaintext: string,
+  bundle: RemoteDeviceBundle
+): Promise<SignalEnvelope> {
+  const store = getStore(myUserId);
+  const address = addressFor(username, bundle.device_id);
+
   const doEncrypt = async (): Promise<SignalEnvelope> => {
-    await ensureSessionWith(myUserId, username);
+    await ensureSessionWithDevice(myUserId, username, bundle);
     const cipher = new SessionCipher(store as any, address);
     const encoded = new TextEncoder().encode(plaintext).buffer;
     const ciphertext = await cipher.encrypt(encoded);
-
-    logEntry("debug", "encrypt", { username, msgType: ciphertext.type });
 
     return {
       content: bufToBase64(
@@ -332,11 +371,9 @@ export async function encryptForUser(myUserId: string, username: string, plainte
   try {
     return await doEncrypt();
   } catch (err: any) {
-    // If the existing session is stale/corrupt (e.g. invalid signature from old key),
-    // delete local session state, force re-fetching latest bundle, and retry once.
-    logEntry("warn", "encrypt_failed_retrying", { username, error: err?.message });
+    logEntry("warn", "encrypt_failed_retrying", { username, deviceId: bundle.device_id, error: err?.message });
     await store.removeSession(address.toString());
-    await ensureSessionWith(myUserId, username, true);
+    await ensureSessionWithDevice(myUserId, username, bundle, true);
 
     const cipher = new SessionCipher(store as any, address);
     const encoded = new TextEncoder().encode(plaintext).buffer;
@@ -353,15 +390,57 @@ export async function encryptForUser(myUserId: string, username: string, plainte
   }
 }
 
-/** Decrypts a message from/to `username`. Handles both the first (PreKey) message and subsequent ones. */
+/**
+ * Encrypts `plaintext` for EVERY active device of `username`, AND for every
+ * one of the sender's OWN other devices (so the message shows up across all
+ * of the sender's logged-in browsers too — Signal Protocol "sync" copies).
+ *
+ * Returns one DeviceCiphertext per recipient device. The caller sends the
+ * whole array to the backend, which stores/fans out one ciphertext row per
+ * device (see chat_events.handle_chat_message_event).
+ */
+export async function encryptForUser(
+  myUserId: string,
+  myUsername: string,
+  username: string,
+  plaintext: string
+): Promise<DeviceCiphertext[]> {
+  const myLocalDeviceId = await getLocalDeviceId(myUserId);
+
+  const [theirBundles, myBundles] = await Promise.all([
+    getDeviceBundlesWithRetry(username),
+    // Don't bother fetching your own bundles if you're messaging yourself —
+    // theirBundles already covers that case.
+    username === myUsername ? Promise.resolve<RemoteDeviceBundle[]>([]) : getDeviceBundlesWithRetry(myUsername).catch(() => []),
+  ]);
+
+  const results: DeviceCiphertext[] = [];
+
+  for (const bundle of theirBundles) {
+    const envelope = await encryptToDevice(myUserId, username, plaintext, bundle);
+    results.push({ ...envelope, recipient_user_id: username, recipient_device_id: bundle.device_id });
+  }
+
+  // Sync copies to my other devices (skip the device I'm sending FROM).
+  for (const bundle of myBundles) {
+    if (bundle.device_id === myLocalDeviceId) continue;
+    const envelope = await encryptToDevice(myUserId, myUsername, plaintext, bundle);
+    results.push({ ...envelope, recipient_user_id: myUserId, recipient_device_id: bundle.device_id });
+  }
+
+  return results;
+}
+
+/** Decrypts a message from `username`'s device `senderDeviceId`. */
 export async function decryptFromUser(
   myUserId: string,
   username: string,
+  senderDeviceId: number,
   envelope: SignalEnvelope,
   conversationId?: string
 ): Promise<string> {
   const store = getStore(myUserId);
-  const address = addressFor(username);
+  const address = addressFor(username, senderDeviceId);
 
   try {
     const cipher = new SessionCipher(store as any, address);
@@ -376,15 +455,11 @@ export async function decryptFromUser(
       plaintextBuf = await cipher.decryptWhisperMessage(bodyBinaryString, "binary");
     }
 
-    logEntry("debug", "decrypt", { username, msgType: envelope.msg_type });
+    logEntry("debug", "decrypt", { username, senderDeviceId, msgType: envelope.msg_type });
     return new TextDecoder().decode(plaintextBuf);
   } catch (err: any) {
-    // If decryption fails (e.g., Bad MAC due to desynced session or cleared site storage),
-    // purge the stale local session so that the NEXT new message automatically re-establishes
-    // a clean fresh X3DH session.
-    logEntry("warn", "decrypt_failed_purging_session", { username, error: err?.message, msgType: envelope.msg_type });
+    logEntry("warn", "decrypt_failed_purging_session", { username, senderDeviceId, error: err?.message, msgType: envelope.msg_type });
     await store.removeSession(address.toString());
-    // Notify the other party to also reset their session so both sides re-establish
     if (conversationId) {
       notifySessionReset(conversationId).catch((e) => logEntry("error", "session_reset_notify_failed", { conversationId, error: e?.message }));
     }
@@ -392,11 +467,20 @@ export async function decryptFromUser(
   }
 }
 
-/** Forces a session reset with `username` by removing the local session state.
- *  The next encryptForUser call will trigger a fresh X3DH handshake. */
-export async function forceSessionReset(myUserId: string, username: string): Promise<void> {
+/** Forces a session reset with a specific device of `username`. */
+export async function forceSessionReset(myUserId: string, username: string, deviceId: number): Promise<void> {
   const store = getStore(myUserId);
-  const address = addressFor(username);
-  logEntry("info", "force_session_reset", { myUserId, username });
+  const address = addressFor(username, deviceId);
+  logEntry("info", "force_session_reset", { myUserId, username, deviceId });
   await store.removeSession(address.toString());
+}
+
+/** Forces a session reset with ALL of `username`'s currently known devices. */
+export async function forceSessionResetAllDevices(myUserId: string, username: string): Promise<void> {
+  try {
+    const bundles = await getDeviceBundlesWithRetry(username);
+    await Promise.all(bundles.map((b) => forceSessionReset(myUserId, username, b.device_id)));
+  } catch (err) {
+    logEntry("warn", "force_session_reset_all_failed", { username, error: String(err) });
+  }
 }

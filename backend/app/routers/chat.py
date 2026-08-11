@@ -23,98 +23,140 @@ class CreateGroupConversationRequest(BaseModel):
 
 
 class KeyBundleUpload(BaseModel):
+    device_id: int | None = None          # None => "register a new device, assign me an id"
+    device_name: str | None = None
     identity_key: str
+    registration_id: int
     signed_prekey: dict
     one_time_prekeys: list[dict]
 
 
 @router.post("/keys")
 def upload_key_bundle(bundle: KeyBundleUpload, current_user: CurrentUser, db: Session = Depends(get_db)):
-    """Upload Signal E2EE public key bundle for the current user — persisted to DB."""
-    from app.models.user import User
-    from app.models.signed_prekey import SignedPreKey
-    from app.models.one_time_prekey import OneTimePreKey
+    """
+    Upload/refresh a Signal E2EE public key bundle for ONE DEVICE of the
+    current user. Each browser/device calls this with its own identity —
+    multiple devices for the same user can coexist.
+    """
+    from app.models.device import Device, DeviceSignedPreKey, DeviceOneTimePreKey
 
-    # Store identity public key on the user record
-    user = db.get(User, current_user.id)
-    user.identity_public_key = bundle.identity_key
-    db.flush()
+    device: Device | None = None
+    if bundle.device_id is not None:
+        device = db.execute(
+            select(Device).where(
+                Device.user_id == current_user.id,
+                Device.device_id == bundle.device_id,
+            )
+        ).scalar_one_or_none()
 
-    # Upsert signed pre-key (one per user)
+    if device is None:
+        # Assign the next free device_id for this user (starts at 1)
+        max_id = db.execute(
+            select(Device.device_id).where(Device.user_id == current_user.id).order_by(Device.device_id.desc()).limit(1)
+        ).scalar_one_or_none()
+        next_id = (max_id or 0) + 1
+        device = Device(
+            user_id=current_user.id,
+            device_id=next_id,
+            device_name=bundle.device_name,
+            identity_public_key=bundle.identity_key,
+            registration_id=bundle.registration_id,
+        )
+        db.add(device)
+        db.flush()
+    else:
+        device.identity_public_key = bundle.identity_key
+        device.device_name = bundle.device_name or device.device_name
+
+    # Upsert this device's signed pre-key (one per device)
     existing_spk = db.execute(
-        select(SignedPreKey).where(SignedPreKey.user_id == current_user.id)
+        select(DeviceSignedPreKey).where(DeviceSignedPreKey.device_id == device.id)
     ).scalar_one_or_none()
     if existing_spk:
         existing_spk.key_id = bundle.signed_prekey["keyId"]
         existing_spk.public_key = bundle.signed_prekey["publicKey"]
         existing_spk.signature = bundle.signed_prekey["signature"]
     else:
-        db.add(SignedPreKey(
-            user_id=current_user.id,
+        db.add(DeviceSignedPreKey(
+            device_id=device.id,
             key_id=bundle.signed_prekey["keyId"],
             public_key=bundle.signed_prekey["publicKey"],
             signature=bundle.signed_prekey["signature"],
         ))
 
-    # Add new one-time pre-keys (avoid duplicates)
+    # Add new one-time pre-keys for this device (avoid duplicates)
     existing_key_ids = set(db.execute(
-        select(OneTimePreKey.key_id).where(OneTimePreKey.user_id == current_user.id)
+        select(DeviceOneTimePreKey.key_id).where(DeviceOneTimePreKey.device_id == device.id)
     ).scalars().all())
     for otk in bundle.one_time_prekeys:
         if otk["keyId"] not in existing_key_ids:
-            db.add(OneTimePreKey(
-                user_id=current_user.id,
+            db.add(DeviceOneTimePreKey(
+                device_id=device.id,
                 key_id=otk["keyId"],
                 public_key=otk["publicKey"],
             ))
 
     db.commit()
-    return {"message": "Key bundle uploaded successfully"}
+    return {"message": "Key bundle uploaded successfully", "device_id": device.device_id}
 
 
 @router.get("/keys/{user_id_or_username}")
-def get_key_bundle(user_id_or_username: str, current_user: CurrentUser, db: Session = Depends(get_db)):
-    """Retrieve Signal E2EE public key bundle for a given user (by user ID or username) from DB."""
+def get_key_bundles(user_id_or_username: str, current_user: CurrentUser, db: Session = Depends(get_db)):
+    """
+    Retrieve Signal E2EE public key bundles for EVERY active device belonging
+    to a given user. The sender must build one session + one ciphertext per
+    device returned here (that's how multi-device fan-out works).
+    """
     from app.models.user import User
-    from app.models.signed_prekey import SignedPreKey
-    from app.models.one_time_prekey import OneTimePreKey
+    from app.models.device import Device, DeviceSignedPreKey, DeviceOneTimePreKey
 
     user = db.execute(
         select(User).where(or_(User.id == user_id_or_username, User.username == user_id_or_username))
     ).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
 
-    if not user or not user.identity_public_key:
-        raise HTTPException(status_code=404, detail="Key bundle not found for this user")
+    devices = db.execute(
+        select(Device).where(Device.user_id == user.id, Device.is_active == True)  # noqa: E712
+    ).scalars().all()
 
-    spk = db.execute(
-        select(SignedPreKey).where(SignedPreKey.user_id == user.id)
-    ).scalar_one_or_none()
-    if not spk:
-        raise HTTPException(status_code=404, detail="Key bundle not found for this user")
+    if not devices:
+        raise HTTPException(status_code=404, detail="No key bundles found for this user")
 
-    # Pop one one-time pre-key (consumed on use — X3DH)
-    otk = db.execute(
-        select(OneTimePreKey).where(OneTimePreKey.user_id == user.id).limit(1)
-    ).scalar_one_or_none()
-    one_time_prekey = None
-    if otk:
-        one_time_prekey = {
-            "key_id": otk.key_id,
-            "public_key": otk.public_key,
-        }
-        db.delete(otk)
-        db.commit()
+    bundles = []
+    for device in devices:
+        spk = db.execute(
+            select(DeviceSignedPreKey).where(DeviceSignedPreKey.device_id == device.id)
+        ).scalar_one_or_none()
+        if not spk:
+            continue  # device registered its identity but never finished uploading prekeys — skip
 
-    return {
-        "identity_key": user.identity_public_key,
-        "registration_id": user.registration_id,
-        "signed_prekey": {
-            "key_id": spk.key_id,
-            "public_key": spk.public_key,
-            "signature": spk.signature,
-        },
-        "one_time_prekey": one_time_prekey,
-    }
+        otk = db.execute(
+            select(DeviceOneTimePreKey).where(DeviceOneTimePreKey.device_id == device.id).limit(1)
+        ).scalar_one_or_none()
+        one_time_prekey = None
+        if otk:
+            one_time_prekey = {"key_id": otk.key_id, "public_key": otk.public_key}
+            db.delete(otk)  # consumed — X3DH one-time use
+
+        bundles.append({
+            "device_id": device.device_id,
+            "identity_key": device.identity_public_key,
+            "registration_id": device.registration_id,
+            "signed_prekey": {
+                "key_id": spk.key_id,
+                "public_key": spk.public_key,
+                "signature": spk.signature,
+            },
+            "one_time_prekey": one_time_prekey,
+        })
+
+    db.commit()
+
+    if not bundles:
+        raise HTTPException(status_code=404, detail="No key bundles found for this user")
+
+    return {"devices": bundles}
 
 
 
@@ -200,9 +242,10 @@ def create_group_conversation(
 def get_chat_history(
     conversation_id: str,
     current_user: CurrentUser,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    device_id: int = 1,
 ):
-    history = chat_history.get_chat_history(db, current_user, conversation_id)
+    history = chat_history.get_chat_history(db, current_user, conversation_id, device_id=device_id)
     if history is None:
         raise HTTPException(status_code=404, detail="Conversation not found or access denied")
     return history
@@ -285,13 +328,22 @@ async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)
         await websocket.close(code=1008)
         return
 
-    await manager.connect(websocket, user.id)
+    # device_id identifies WHICH of this user's devices/browsers this socket
+    # belongs to — required so per-device Signal ciphertexts can be routed to
+    # the correct connection instead of just "a" connection for this user.
+    device_id_raw = websocket.query_params.get("device_id")
+    try:
+        device_id = int(device_id_raw) if device_id_raw is not None else 1
+    except ValueError:
+        device_id = 1
+
+    await manager.connect(websocket, user.id, device_id)
     try:
         while True:
             data = await websocket.receive_json()
             if data.get("type") == "reaction":
                 await chat_events.handle_reaction_event(db, user, data)
             elif "conversation_id" in data:
-                await chat_events.handle_chat_message_event(db, user, data)
+                await chat_events.handle_chat_message_event(db, user, data, sender_device_id=device_id)
     except WebSocketDisconnect:
-        await manager.disconnect(user.id)
+        await manager.disconnect(user.id, device_id)

@@ -16,7 +16,8 @@ from app.services.connection_manager import manager
 
 
 def get_online_user_ids() -> List[str]:
-    return list(manager.active_connections.keys())
+    # active_connections is now keyed by (user_id, device_id) — deduplicate
+    return list({uid for (uid, _did) in manager.active_connections})
 
 
 def _conversation_ids_for_user(db: Session, user_id: str) -> List[str]:
@@ -107,8 +108,20 @@ def get_conversations(db: Session, current_user: User) -> List[dict]:
     return result
 
 
-def get_chat_history(db: Session, current_user: User, conversation_id: str) -> Optional[List[dict]]:
-    """Returns None if the conversation doesn't exist or the user isn't a participant."""
+def get_chat_history(
+    db: Session,
+    current_user: User,
+    conversation_id: str,
+    device_id: int = 1,
+) -> Optional[List[dict]]:
+    """Returns None if the conversation doesn't exist or the user isn't a participant.
+
+    For multi-device E2EE messages (those with rows in message_ciphertexts),
+    returns the ciphertext row addressed to the requesting device so the client
+    can decrypt it. Legacy single-ciphertext messages fall back to Message.content.
+    """
+    from app.models.message_ciphertext import MessageCiphertext
+
     is_participant = db.execute(
         select(ConversationParticipant).where(
             ConversationParticipant.conversation_id == conversation_id,
@@ -124,17 +137,63 @@ def get_chat_history(db: Session, current_user: User, conversation_id: str) -> O
         .order_by(Message.created_at)
     ).scalars().all()
 
-    return [{
-        "id": msg.id,
-        "conversation_id": msg.conversation_id,
-        "sender_id": msg.sender_id,
-        "content": msg.content,
-        "msg_type": msg.msg_type,
-        "image_url": msg.image_url,
-        "is_read": msg.is_read,
-        "created_at": msg.created_at,
-        "reactions": [{"user_id": r.user_id, "emoji": r.emoji} for r in msg.reactions],
-    } for msg in messages]
+    result = []
+    for msg in messages:
+        # Look for a per-device ciphertext addressed to THIS user + device.
+        ct = db.execute(
+            select(MessageCiphertext).where(
+                MessageCiphertext.message_id == msg.id,
+                MessageCiphertext.recipient_user_id == current_user.id,
+                MessageCiphertext.recipient_device_id == device_id,
+            )
+        ).scalar_one_or_none()
+
+        # For messages the current user SENT, try to get the sync copy (their
+        # own device's ciphertext). If there isn't one, content is None —
+        # the frontend already shows "[Sent message — not available on this device]".
+        if ct is None and msg.sender_id == current_user.id:
+            ct = db.execute(
+                select(MessageCiphertext).where(
+                    MessageCiphertext.message_id == msg.id,
+                    MessageCiphertext.recipient_user_id == current_user.id,
+                ).limit(1)
+            ).scalar_one_or_none()
+
+        # Determine which ciphertext/sender_device_id to serve.
+        if ct is not None:
+            # Multi-device path: use the per-device ciphertext.
+            content = ct.content
+            msg_type = ct.msg_type
+            # sender_device_id isn't stored on Message; recover from any
+            # ciphertext row NOT addressed to the current user (the sender's copy).
+            sender_ct = db.execute(
+                select(MessageCiphertext).where(
+                    MessageCiphertext.message_id == msg.id,
+                    MessageCiphertext.recipient_user_id != current_user.id,
+                ).limit(1)
+            ).scalar_one_or_none()
+            # We don't persist sender_device_id on Message yet; default to 1.
+            sender_device_id = 1
+        else:
+            # Legacy path: single ciphertext stored in Message.content.
+            content = msg.content
+            msg_type = msg.msg_type
+            sender_device_id = 1
+
+        result.append({
+            "id": msg.id,
+            "conversation_id": msg.conversation_id,
+            "sender_id": msg.sender_id,
+            "sender_device_id": sender_device_id,
+            "content": content,
+            "msg_type": msg_type,
+            "image_url": msg.image_url,
+            "is_read": msg.is_read,
+            "created_at": msg.created_at,
+            "reactions": [{"user_id": r.user_id, "emoji": r.emoji} for r in msg.reactions],
+        })
+
+    return result
 
 
 def mark_conversation_read(db: Session, current_user: User, conversation_id: str) -> List[str]:

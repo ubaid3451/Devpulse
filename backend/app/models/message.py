@@ -26,7 +26,13 @@ class Message(Base):
     # message establishing a session), 1 = WhisperMessage (every message
     # after that, once the Double Ratchet is running). The server never
     # inspects either value — it just stores and relays them.
-    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Nullable now: multi-device conversations store per-recipient-device
+    # ciphertexts in the separate `message_ciphertexts` table instead (see
+    # MessageCiphertext) — a single shared `content` can't be decrypted by
+    # more than one device's session. Kept for backward compat with rows
+    # written before multi-device support / any code path still using the
+    # legacy single-ciphertext fallback.
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
     msg_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     image_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)

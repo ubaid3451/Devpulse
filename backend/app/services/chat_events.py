@@ -1,5 +1,6 @@
 """
-Handlers for inbound WebSocket events (reactions, new chat messages) — group-chat capable, E2EE-aware, block-aware.
+Handlers for inbound WebSocket events (reactions, new chat messages) —
+group-chat capable, E2EE-aware, block-aware, multi-device-aware.
 """
 
 from sqlalchemy import select, or_, and_
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.models.message import Message
+from app.models.message_ciphertext import MessageCiphertext
 from app.models.message_reaction import MessageReaction
 from app.models.conversation_participant import ConversationParticipant
 from app.models.block import Block
@@ -72,7 +74,30 @@ async def handle_reaction_event(db: Session, user: User, data: dict) -> None:
         await manager.send_personal_message(reaction_payload, participant_id)
 
 
-async def handle_chat_message_event(db: Session, user: User, data: dict) -> None:
+async def handle_chat_message_event(db: Session, user: User, data: dict, sender_device_id: int = 1) -> None:
+    """
+    Expects the NEW multi-device payload shape from the client:
+
+        {
+          "conversation_id": "...",
+          "image_url": "..." | None,
+          "ciphertexts": [
+            {"recipient_user_id": "...", "recipient_device_id": 1, "content": "base64...", "msg_type": 3},
+            {"recipient_user_id": "...", "recipient_device_id": 2, "content": "base64...", "msg_type": 3}
+          ]
+        }
+
+    One ciphertext per recipient device is required because each device has
+    an independent Double Ratchet session with the sender — there is no
+    single ciphertext that all of a user's devices could jointly decrypt.
+    The ciphertexts list should include entries for the sender's OWN other
+    devices too (Signal Protocol "sync" copies), so a message sent from one
+    browser also appears in the sender's other logged-in browsers.
+
+    Backward compatibility: if "ciphertexts" is absent but legacy
+    "content"/"msg_type" fields are present, falls back to the old
+    single-ciphertext behavior (pre-multi-device clients).
+    """
     conversation_id = data.get("conversation_id")
     if not conversation_id:
         return
@@ -86,44 +111,90 @@ async def handle_chat_message_event(db: Session, user: User, data: dict) -> None
     if not is_participant:
         return
 
-    # Block check: don't let a message through if the sender is blocked by
-    # (or has blocked) ANY other participant in this conversation. For 1-on-1
-    # chats this is simply "the other person"; written generically so it
-    # also covers group chats correctly if/when those support blocking too.
     other_participant_ids = [
         pid for pid in _participant_ids(db, conversation_id) if pid != user.id
     ]
     if _is_blocked_with_any(db, user.id, other_participant_ids):
-        # Silently drop the message rather than raising an exception that
-        # could crash the WebSocket connection — the sender's own client
-        # already shouldn't be showing a send box for a blocked
-        # conversation (see frontend), so reaching this path means someone
-        # is calling the API directly rather than through the normal UI.
+        # Silently drop — the client normally prevents sending into a
+        # blocked conversation, so reaching here means a direct API call
+        # bypassed the UI.
         return
 
+    ciphertexts_in = data.get("ciphertexts")
+
+    # Legacy fallback: single ciphertext, no device fan-out (old client).
+    if not ciphertexts_in:
+        new_msg = Message(
+            conversation_id=conversation_id,
+            sender_id=user.id,
+            content=data.get("content", ""),
+            msg_type=data.get("msg_type"),
+            image_url=data.get("image_url"),
+        )
+        db.add(new_msg)
+        db.commit()
+        db.refresh(new_msg)
+
+        msg_payload = {
+            "type": "chat_message",
+            "id": new_msg.id,
+            "conversation_id": new_msg.conversation_id,
+            "sender_id": new_msg.sender_id,
+            "content": new_msg.content,
+            "msg_type": new_msg.msg_type,
+            "image_url": new_msg.image_url,
+            "is_read": new_msg.is_read,
+            "created_at": new_msg.created_at.isoformat(),
+            "reactions": [],
+        }
+        for participant_id in _participant_ids(db, conversation_id):
+            await manager.send_personal_message(msg_payload, participant_id)
+        return
+
+    # New multi-device path: one Message row (shared metadata) + N
+    # MessageCiphertext rows (one per recipient device).
     new_msg = Message(
         conversation_id=conversation_id,
         sender_id=user.id,
-        content=data.get("content", ""),
-        msg_type=data.get("msg_type"),
+        content="",          # unused for E2EE multi-device path
+        msg_type=None,
         image_url=data.get("image_url"),
     )
     db.add(new_msg)
+    db.flush()  # get new_msg.id without committing yet
+
+    ciphertext_rows = []
+    for ct in ciphertexts_in:
+        row = MessageCiphertext(
+            message_id=new_msg.id,
+            recipient_user_id=ct["recipient_user_id"],
+            recipient_device_id=ct["recipient_device_id"],
+            content=ct["content"],
+            msg_type=ct["msg_type"],
+        )
+        db.add(row)
+        ciphertext_rows.append(row)
+
     db.commit()
     db.refresh(new_msg)
 
-    msg_payload = {
-        "type": "chat_message",
-        "id": new_msg.id,
-        "conversation_id": new_msg.conversation_id,
-        "sender_id": new_msg.sender_id,
-        "content": new_msg.content,
-        "msg_type": new_msg.msg_type,
-        "image_url": new_msg.image_url,
-        "is_read": new_msg.is_read,
-        "created_at": new_msg.created_at.isoformat(),
-        "reactions": [],
-    }
-
-    for participant_id in _participant_ids(db, conversation_id):
-        await manager.send_personal_message(msg_payload, participant_id)
+    # Fan out: each recipient device gets ONLY its own ciphertext, delivered
+    # to that specific (user_id, device_id) socket if currently connected.
+    # Offline devices fetch their ciphertext later via the REST chat-history
+    # endpoint (which also needs to become device-aware — see
+    # get_chat_history / chat_history.py).
+    for row in ciphertext_rows:
+        payload = {
+            "type": "chat_message",
+            "id": new_msg.id,
+            "conversation_id": new_msg.conversation_id,
+            "sender_id": new_msg.sender_id,
+            "sender_device_id": sender_device_id,
+            "content": row.content,
+            "msg_type": row.msg_type,
+            "image_url": new_msg.image_url,
+            "is_read": new_msg.is_read,
+            "created_at": new_msg.created_at.isoformat(),
+            "reactions": [],
+        }
+        await manager.send_to_device(payload, row.recipient_user_id, row.recipient_device_id)
