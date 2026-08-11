@@ -96,7 +96,13 @@ function ChatPageContent() {
     if (localDeviceIdRef.current !== null) return; // already loaded
     const DB_NAME = `devpulse_signal_store_${currentUser.id}`;
     try {
-      const req = indexedDB.open(DB_NAME, 1);
+      const req = indexedDB.open(DB_NAME, 2);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("kv")) {
+          db.createObjectStore("kv");
+        }
+      };
       req.onsuccess = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains("kv")) return;

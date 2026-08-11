@@ -33,13 +33,37 @@ function dbNameFor(userId: string): string {
   return `devpulse_signal_store_${userId}`;
 }
 
+const DB_VERSION = 2;
+
 function openDb(userId: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(dbNameFor(userId), 1);
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore(STORE_NAME);
+    const dbName = dbNameFor(userId);
+    const req = indexedDB.open(dbName, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        // DB exists from older version without 'kv' store — close and recreate
+        db.close();
+        const delReq = indexedDB.deleteDatabase(dbName);
+        delReq.onsuccess = () => {
+          const retryReq = indexedDB.open(dbName, DB_VERSION);
+          retryReq.onupgradeneeded = () => {
+            retryReq.result.createObjectStore(STORE_NAME);
+          };
+          retryReq.onsuccess = () => resolve(retryReq.result);
+          retryReq.onerror = () => reject(retryReq.error);
+        };
+        delReq.onerror = () => reject(new Error("Failed to recreate missing IndexedDB store"));
+        return;
+      }
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
   });
 }

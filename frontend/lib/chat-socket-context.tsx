@@ -105,7 +105,13 @@ function dbNameForDeviceLookup(userId: string): string {
 function getLocalDeviceId(userId: string): Promise<number> {
   return new Promise((resolve) => {
     try {
-      const req = indexedDB.open(dbNameForDeviceLookup(userId), 1);
+      const req = indexedDB.open(dbNameForDeviceLookup(userId), 2);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("kv")) {
+          db.createObjectStore("kv");
+        }
+      };
       req.onsuccess = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains("kv")) {
@@ -118,9 +124,6 @@ function getLocalDeviceId(userId: string): Promise<number> {
         getReq.onerror = () => resolve(1);
       };
       req.onerror = () => resolve(1);
-      req.onupgradeneeded = () => {
-        // DB didn't exist yet — nothing to read.
-      };
     } catch {
       resolve(1);
     }
