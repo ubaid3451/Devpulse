@@ -29,12 +29,21 @@ if settings.cloudinary_cloud_name and settings.cloudinary_api_key and settings.c
     )
 
 
+def _ensure_cloudinary_configured() -> bool:
+    settings = get_settings()
+    if settings.cloudinary_cloud_name and settings.cloudinary_api_key and settings.cloudinary_api_secret:
+        cloudinary.config(
+            cloud_name=settings.cloudinary_cloud_name,
+            api_key=settings.cloudinary_api_key,
+            api_secret=settings.cloudinary_api_secret,
+            secure=True,
+        )
+        return True
+    return False
+
+
 def is_cloudinary_configured() -> bool:
-    return bool(
-        settings.cloudinary_cloud_name
-        and settings.cloudinary_api_key
-        and settings.cloudinary_api_secret
-    )
+    return _ensure_cloudinary_configured()
 
 
 def upload_image_to_cloudinary_or_local(image: UploadFile, folder: str, prefix: str = "img") -> str:
@@ -46,7 +55,7 @@ def upload_image_to_cloudinary_or_local(image: UploadFile, folder: str, prefix: 
     if not image.content_type or not image.content_type.startswith("image/"):
         raise ValueError("File must be an image")
 
-    if is_cloudinary_configured():
+    if _ensure_cloudinary_configured():
         result = cloudinary.uploader.upload(
             image.file,
             folder=f"devpulse/{folder}",

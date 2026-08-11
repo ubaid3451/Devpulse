@@ -61,9 +61,9 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
 
     # ── Cloudinary ────────────────────────────────────────────────────────────
-    cloudinary_cloud_name: str = ""
-    cloudinary_api_key: str = ""
-    cloudinary_api_secret: str = ""
+    cloudinary_cloud_name: str = "devpulse"
+    cloudinary_api_key: str = "142434116449543"
+    cloudinary_api_secret: str = "2V7PbPuUUQnWOqXwWrO-gn45NCM"
 
     # ── Admin ───────────────────────────────────────────────────────────────────
     admin_emails: str = ""
