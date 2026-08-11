@@ -24,6 +24,7 @@ import {
   decryptFromUser,
   forceSessionReset,
   forceSessionResetAllDevices,
+  getMyLocalDeviceId,
   DeviceCiphertext,
   SignalEnvelope,
 } from "./signal-e2ee";

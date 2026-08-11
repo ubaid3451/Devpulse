@@ -93,14 +93,14 @@ function ChatPageContent() {
 
   const refreshConversations = () => {
     getConversations(myDeviceIdRef.current)
-      .then(async (convos) => {
+      .then(async (convos: ConversationResponse[]) => {
         setConversations(convos);
 
         if (!currentUser || !e2eeReady) return;
 
         const previews: Record<string, string> = {};
         await Promise.all(
-          convos.map(async (convo) => {
+          convos.map(async (convo: ConversationResponse) => {
             if (convo.is_group || !convo.last_message_encrypted || !convo.last_message_id) return;
 
             const cached = getCachedMessagePlaintext(currentUser.id, convo.last_message_id);
@@ -114,14 +114,14 @@ function ChatPageContent() {
 
             // Own message we don't have a cached plaintext for = sent from
             // another device — can't decrypt it here.
-            const lastMessageSenderId = (convo as any).last_message_sender_id;
+            const lastMessageSenderId = convo.last_message_sender_id;
             if (lastMessageSenderId === currentUser.id) {
               previews[convo.conversation_id] = "[Sent from another device]";
               return;
             }
 
             try {
-              const senderDeviceId: number = (convo as any).last_message_sender_device_id ?? 1;
+              const senderDeviceId: number = convo.last_message_sender_device_id ?? 1;
               const plaintext = await decryptFrom(
                 otherUsername,
                 senderDeviceId,

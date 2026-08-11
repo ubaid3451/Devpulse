@@ -120,6 +120,11 @@ async function getLocalDeviceId(userId: string): Promise<number | undefined> {
   return id;
 }
 
+export async function getMyLocalDeviceId(userId: string): Promise<number> {
+  const id = await getLocalDeviceId(userId);
+  return id ?? 1;
+}
+
 const pendingSetups = new Map<string, Promise<void>>();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
