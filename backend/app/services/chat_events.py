@@ -183,6 +183,7 @@ async def handle_chat_message_event(db: Session, user: User, data: dict, sender_
     # Offline devices fetch their ciphertext later via the REST chat-history
     # endpoint (which also needs to become device-aware — see
     # get_chat_history / chat_history.py).
+    sent_to_sender = False
     for row in ciphertext_rows:
         payload = {
             "type": "chat_message",
@@ -198,3 +199,23 @@ async def handle_chat_message_event(db: Session, user: User, data: dict, sender_
             "reactions": [],
         }
         await manager.send_to_device(payload, row.recipient_user_id, row.recipient_device_id)
+        if row.recipient_user_id == user.id and row.recipient_device_id == sender_device_id:
+            sent_to_sender = True
+
+    # Always ensure the active sending device receives a confirmation WS event
+    # so the sender UI appends the sent message cleanly.
+    if not sent_to_sender:
+        sender_payload = {
+            "type": "chat_message",
+            "id": new_msg.id,
+            "conversation_id": new_msg.conversation_id,
+            "sender_id": new_msg.sender_id,
+            "sender_device_id": sender_device_id,
+            "content": "",
+            "msg_type": None,
+            "image_url": new_msg.image_url,
+            "is_read": new_msg.is_read,
+            "created_at": new_msg.created_at.isoformat(),
+            "reactions": [],
+        }
+        await manager.send_to_device(sender_payload, user.id, sender_device_id)

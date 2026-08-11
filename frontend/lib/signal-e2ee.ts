@@ -261,14 +261,25 @@ interface RemoteDeviceBundle {
   one_time_prekey: { key_id: number; public_key: string } | null;
 }
 
-/** Fetches every active device bundle for `username` (retries on transient errors). */
-async function getDeviceBundlesWithRetry(username: string): Promise<RemoteDeviceBundle[]> {
+const deviceBundleCache = new Map<string, { bundles: RemoteDeviceBundle[]; fetchedAt: number }>();
+const BUNDLE_CACHE_TTL_MS = 60_000; // 1 minute cache
+
+/** Fetches every active device bundle for `username` (cached in-memory for 1 min). */
+async function getDeviceBundlesWithRetry(username: string, forceRefresh = false): Promise<RemoteDeviceBundle[]> {
+  const now = Date.now();
+  const cached = deviceBundleCache.get(username);
+  if (!forceRefresh && cached && now - cached.fetchedAt < BUNDLE_CACHE_TTL_MS) {
+    return cached.bundles;
+  }
+
   let lastError: any;
 
   for (let attempt = 0; attempt <= KEY_BUNDLE_FETCH_RETRIES; attempt++) {
     try {
       const res = await getKeyBundles(username);
-      return res.devices as RemoteDeviceBundle[];
+      const bundles = res.devices as RemoteDeviceBundle[];
+      deviceBundleCache.set(username, { bundles, fetchedAt: now });
+      return bundles;
     } catch (err: any) {
       lastError = err;
       if (err?.status === 404 || err?.message?.includes("not found")) {
@@ -477,8 +488,9 @@ export async function forceSessionReset(myUserId: string, username: string, devi
 
 /** Forces a session reset with ALL of `username`'s currently known devices. */
 export async function forceSessionResetAllDevices(myUserId: string, username: string): Promise<void> {
+  deviceBundleCache.delete(username);
   try {
-    const bundles = await getDeviceBundlesWithRetry(username);
+    const bundles = await getDeviceBundlesWithRetry(username, true);
     await Promise.all(bundles.map((b) => forceSessionReset(myUserId, username, b.device_id)));
   } catch (err) {
     logEntry("warn", "force_session_reset_all_failed", { username, error: String(err) });
