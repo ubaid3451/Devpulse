@@ -10,5 +10,7 @@ from app.models.signed_prekey import SignedPreKey  # noqa: F401
 from app.models.one_time_prekey import OneTimePreKey  # noqa: F401
 from app.models.message import Message  # noqa: F401
 from app.models.message_reaction import MessageReaction  # noqa: F401
+from app.models.message_ciphertext import MessageCiphertext  # noqa: F401
+from app.models.device import Device, DeviceSignedPreKey, DeviceOneTimePreKey  # noqa: F401
 from app.models.block import Block  # noqa: F401
 from app.models.admin_permission import AdminPermission  # noqa: F401
