@@ -419,8 +419,9 @@ function ChatPageContent() {
       const convo = conversations.find((c) => c.conversation_id === activeConversationId);
       const otherUsername = !convo?.is_group ? convo?.participants[0]?.username : undefined;
 
-      if (otherUsername && e2eeReady && inputText.trim()) {
-        const plaintext = inputText.trim();
+      const plaintext = inputText.trim();
+
+      if (otherUsername && e2eeReady && plaintext) {
         try {
           // encryptFor returns one DeviceCiphertext per active device of the
           // recipient + one per each of our own other devices (sync copies).
@@ -439,9 +440,12 @@ function ChatPageContent() {
           alert("Couldn't send message securely. Please try again.");
           return;
         }
+      } else if (otherUsername && imageUrl) {
+        // Image-only message in 1-on-1 direct chat
+        sendMessage(activeConversationId, [], imageUrl);
       } else if (!otherUsername) {
         // Group chat — not E2EE yet, falls back to unencrypted server-side.
-        sendMessage(activeConversationId, [], imageUrl);
+        sendMessage(activeConversationId, [], imageUrl, plaintext || null);
       }
 
       setInputText("");
