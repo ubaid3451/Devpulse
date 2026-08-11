@@ -121,6 +121,38 @@ def get_key_bundles(user_id_or_username: str, current_user: CurrentUser, db: Ses
     ).scalars().all()
 
     if not devices:
+        # Backward compatibility fallback for existing users who haven't uploaded
+        # to the new `devices` table yet (legacy single-device model).
+        from app.models.signed_prekey import SignedPreKey
+        from app.models.one_time_prekey import OneTimePreKey
+
+        if user.identity_public_key:
+            spk = db.execute(
+                select(SignedPreKey).where(SignedPreKey.user_id == user.id)
+            ).scalar_one_or_none()
+            if spk:
+                otk = db.execute(
+                    select(OneTimePreKey).where(OneTimePreKey.user_id == user.id).limit(1)
+                ).scalar_one_or_none()
+                one_time_prekey = None
+                if otk:
+                    one_time_prekey = {"key_id": otk.key_id, "public_key": otk.public_key}
+                    db.delete(otk)
+                    db.commit()
+                return {
+                    "devices": [{
+                        "device_id": 1,
+                        "identity_key": user.identity_public_key,
+                        "registration_id": user.registration_id or 1,
+                        "signed_prekey": {
+                            "key_id": spk.key_id,
+                            "public_key": spk.public_key,
+                            "signature": spk.signature,
+                        },
+                        "one_time_prekey": one_time_prekey,
+                    }]
+                }
+
         raise HTTPException(status_code=404, detail="No key bundles found for this user")
 
     bundles = []
