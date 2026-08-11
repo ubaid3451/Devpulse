@@ -186,12 +186,20 @@ async function doEnsureIdentitySetUp(userId: string): Promise<void> {
     logEntry("info", "identity_stored", { userId });
   } else if (localDeviceId !== undefined) {
     // Already fully set up on this browser (identity + registered device id
-    // + prekeys uploaded at least once). Only skip if signed prekey exists.
+    // + prekeys uploaded at least once). Only skip if signed prekey exists AND server has device registered.
     const existingSignedPreKey = await store.loadSignedPreKey(1);
     if (existingSignedPreKey) {
-      logEntry("info", "identity_already_exists_skipping_upload", { userId, localDeviceId });
-      localDeviceIdCache.set(userId, localDeviceId);
-      return;
+      try {
+        const serverBundles = await getKeyBundles(userId);
+        const hasDeviceOnServer = serverBundles?.devices?.some((d: any) => d.device_id === localDeviceId);
+        if (hasDeviceOnServer) {
+          logEntry("info", "identity_already_exists_skipping_upload", { userId, localDeviceId });
+          localDeviceIdCache.set(userId, localDeviceId);
+          return;
+        }
+      } catch (_) {
+        // Fall through to upload if server check fails
+      }
     }
   }
 
