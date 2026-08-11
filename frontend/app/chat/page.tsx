@@ -172,6 +172,10 @@ function ChatPageContent() {
     setIsResolvingConversation(true);
     startDirectConversation(initialUsername)
       .then((res) => {
+        setConversations((prev) => {
+          if (prev.some((c) => c.conversation_id === res.conversation_id)) return prev;
+          return [res, ...prev];
+        });
         setActiveConversationId(res.conversation_id);
         refreshConversations();
       })
@@ -397,6 +401,10 @@ function ChatPageContent() {
     setSearchQuery("");
     try {
       const res = await startDirectConversation(user.username);
+      setConversations((prev) => {
+        if (prev.some((c) => c.conversation_id === res.conversation_id)) return prev;
+        return [res, ...prev];
+      });
       setActiveConversationId(res.conversation_id);
       refreshConversations();
     } catch (err: any) {

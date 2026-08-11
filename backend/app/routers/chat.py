@@ -243,7 +243,25 @@ def start_direct_conversation(
         raise HTTPException(status_code=403, detail="You can't message this user")
 
     convo = chat_history.get_or_create_direct_conversation(db, current_user.id, other_user.id)
-    return {"conversation_id": convo.id, "is_group": convo.is_group}
+    return {
+        "conversation_id": convo.id,
+        "is_group": convo.is_group,
+        "participants": [
+            {
+                "id": other_user.id,
+                "username": other_user.username,
+                "full_name": other_user.full_name,
+                "avatar_url": other_user.avatar_url,
+            }
+        ],
+        "is_blocked": False,
+        "unread_count": 0,
+        "last_message": None,
+        "last_message_id": None,
+        "last_message_msg_type": None,
+        "last_message_encrypted": False,
+        "last_message_at": convo.created_at.isoformat(),
+    }
 
 
 @router.post("/conversations/group")
