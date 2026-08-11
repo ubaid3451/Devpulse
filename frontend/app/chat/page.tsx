@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useChatSocket } from "@/lib/chat-socket-context";
 import { useE2EE } from "@/lib/e2ee-context";
+import { getMyLocalDeviceId } from "@/lib/signal-e2ee";
 import { cacheMessagePlaintext, getCachedMessagePlaintext } from "@/lib/message-plaintext-cache";
 import { requestNotificationPermission, showDesktopNotification, isTabHidden } from "@/lib/notifications";
 import AppLayout from "@/components/AppLayout";
@@ -30,7 +31,7 @@ function ChatPageContent() {
   const { user: currentUser } = useAuth();
   const { onlineUsers, sendMessage, sendReaction, onChatMessage, onReactionUpdate, onMessagesRead, onSessionReset } =
     useChatSocket();
-  const { isReady: e2eeReady, encryptFor, decryptFrom, forceSessionReset, forceSessionResetAllDevices } = useE2EE();
+  const { isReady: e2eeReady, encryptFor, decryptFrom, forceSessionResetAllDevices } = useE2EE();
 
   const [conversations, setConversations] = useState<ConversationResponse[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -77,10 +78,10 @@ function ChatPageContent() {
   const pendingSentPlaintexts = useRef<string[]>([]);
   const conversationsRef = useRef<ConversationResponse[]>([]);
   const activeConversationIdRef = useRef<string | null>(null);
-  // This browser's Signal Protocol device id — loaded once from IndexedDB
-  // after E2EE is ready, used to request device-specific ciphertexts from
-  // the chat history endpoint.
-  const localDeviceIdRef = useRef<number | null>(null);
+  // This browser's Signal Protocol device id — populated once e2eeReady
+  // flips true. Used to tag REST calls so the backend returns THIS device's
+  // ciphertext rows rather than another device's.
+  const myDeviceIdRef = useRef<number>(1);
 
   useEffect(() => {
     conversationsRef.current = conversations;
@@ -89,43 +90,18 @@ function ChatPageContent() {
     activeConversationIdRef.current = activeConversationId;
   }, [activeConversationId]);
 
-  // Load this browser's Signal device id from IndexedDB once E2EE is ready.
-  // Used to fetch the per-device ciphertext slice from the history endpoint.
-  useEffect(() => {
-    if (!e2eeReady || !currentUser) return;
-    if (localDeviceIdRef.current !== null) return; // already loaded
-    const DB_NAME = `devpulse_signal_store_${currentUser.id}`;
-    try {
-      const req = indexedDB.open(DB_NAME, 2);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains("kv")) {
-          db.createObjectStore("kv");
-        }
-      };
-      req.onsuccess = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains("kv")) return;
-        const tx = db.transaction("kv", "readonly");
-        const getReq = tx.objectStore("kv").get("localDeviceId");
-        getReq.onsuccess = () => {
-          if (typeof getReq.result === "number") {
-            localDeviceIdRef.current = getReq.result;
-          }
-        };
-      };
-    } catch {
-      // IndexedDB unavailable — default to 1 (handled at call site)
-    }
-  }, [e2eeReady, currentUser]);
-
   const [decryptedPreviews, setDecryptedPreviews] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!currentUser || !e2eeReady) return;
+    getMyLocalDeviceId(currentUser.id).then((id) => { myDeviceIdRef.current = id; });
+  }, [currentUser, e2eeReady]);
 
   // Track processed message IDs to prevent double-decryption on WebSocket reconnect/replay
   const processedMessageIds = useRef<Set<string>>(new Set());
 
   const refreshConversations = () => {
-    getConversations(e2eeReady ? (localDeviceIdRef.current ?? undefined) : undefined)
+    getConversations(myDeviceIdRef.current)
       .then(async (convos) => {
         setConversations(convos);
 
@@ -145,12 +121,21 @@ function ChatPageContent() {
             const otherUsername = convo.participants[0]?.username;
             if (!otherUsername || !convo.last_message || convo.last_message_msg_type == null) return;
 
+            // Own message we don't have a cached plaintext for = sent from
+            // another device — can't decrypt it here.
+            if (convo.last_message_sender_id === currentUser.id) {
+              previews[convo.conversation_id] = "[Sent from another device]";
+              return;
+            }
+
             try {
-              const senderDeviceId = convo.last_message_sender_device_id ?? 1;
-              const plaintext = await decryptFrom(otherUsername, senderDeviceId, {
-                content: convo.last_message,
-                msg_type: Number(convo.last_message_msg_type),
-              }, convo.conversation_id);
+              const senderDeviceId: number = (convo as any).last_message_sender_device_id ?? 1;
+              const plaintext = await decryptFrom(
+                otherUsername,
+                senderDeviceId,
+                { content: convo.last_message, msg_type: Number(convo.last_message_msg_type) },
+                convo.conversation_id
+              );
               cacheMessagePlaintext(currentUser.id, convo.last_message_id, plaintext);
               previews[convo.conversation_id] = plaintext;
             } catch (err) {
@@ -173,10 +158,6 @@ function ChatPageContent() {
     setIsResolvingConversation(true);
     startDirectConversation(initialUsername)
       .then((res) => {
-        setConversations((prev) => {
-          if (prev.some((c) => c.conversation_id === res.conversation_id)) return prev;
-          return [res, ...prev];
-        });
         setActiveConversationId(res.conversation_id);
         refreshConversations();
       })
@@ -205,9 +186,9 @@ function ChatPageContent() {
     const convo = conversations.find((c) => c.conversation_id === activeConversationId);
     const otherUsername = !convo?.is_group ? convo?.participants[0]?.username : undefined;
 
-    getChatHistory(activeConversationId, 50, undefined, e2eeReady ? (localDeviceIdRef.current ?? 1) : undefined)
+    getChatHistory(activeConversationId, 50, undefined, myDeviceIdRef.current)
       .then(async (history) => {
-        if (!otherUsername || !e2eeReady) {
+        if (!e2eeReady) {
           setMessages(history);
           return;
         }
@@ -230,13 +211,28 @@ function ChatPageContent() {
           }
 
           if (msg.sender_id === currentUser?.id) {
-            decrypted.push({ ...msg, content: "[Sent message — not available on this device]" });
+            decrypted.push({ ...msg, content: "[Sent from another device]" });
+            continue;
+          }
+
+          // For history we need the sender's username — in a 1-on-1 it's
+          // always the other participant; in a group it's whoever sent it.
+          const senderUsername = convo?.is_group
+            ? convo.participants.find((p) => p.id === msg.sender_id)?.username ?? otherUsername
+            : otherUsername;
+          if (!senderUsername) {
+            decrypted.push(msg);
             continue;
           }
 
           try {
-            const senderDeviceId = msg.sender_device_id ?? 1;
-            const plaintext = await decryptFrom(otherUsername, senderDeviceId, { content: msg.content || "", msg_type: Number(msg.msg_type) }, activeConversationId);
+            const senderDeviceId: number = (msg as any).sender_device_id ?? 1;
+            const plaintext = await decryptFrom(
+              senderUsername,
+              senderDeviceId,
+              { content: msg.content || "", msg_type: Number(msg.msg_type) },
+              activeConversationId
+            );
             if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
             decrypted.push({ ...msg, content: plaintext });
           } catch (err) {
@@ -325,7 +321,7 @@ function ChatPageContent() {
         toAppend = { ...msg, content: plaintextContent };
       } else if (msg.msg_type && e2eeReady && otherUsername) {
         try {
-          const senderDeviceId = msg.sender_device_id ?? 1;
+          const senderDeviceId: number = (msg as any).sender_device_id ?? 1;
           const plaintext = await decryptFrom(otherUsername, senderDeviceId, { content: msg.content || "", msg_type: Number(msg.msg_type) }, msg.conversation_id);
           if (currentUser) cacheMessagePlaintext(currentUser.id, msg.id, plaintext);
           plaintextContent = plaintext;
@@ -388,8 +384,6 @@ function ChatPageContent() {
       const otherUsername = convo && !convo.is_group ? convo.participants[0]?.username : undefined;
       if (!otherUsername) return;
       console.info("[Signal:INFO] session_reset_received_from_peer", { conversationId: event.conversation_id, otherUsername });
-      // Reset sessions with ALL of the other user's devices since we don't
-      // know which specific device triggered the reset.
       forceSessionResetAllDevices(otherUsername).catch((err) =>
         console.error("[Signal:ERROR] session_reset_local_purge_failed", { otherUsername, error: String(err) })
       );
@@ -402,10 +396,6 @@ function ChatPageContent() {
     setSearchQuery("");
     try {
       const res = await startDirectConversation(user.username);
-      setConversations((prev) => {
-        if (prev.some((c) => c.conversation_id === res.conversation_id)) return prev;
-        return [res, ...prev];
-      });
       setActiveConversationId(res.conversation_id);
       refreshConversations();
     } catch (err: any) {
@@ -438,19 +428,20 @@ function ChatPageContent() {
       if (otherUsername && e2eeReady && inputText.trim()) {
         const plaintext = inputText.trim();
         try {
-          // encryptFor now returns DeviceCiphertext[] — one per recipient device
-          // (plus sync copies to sender's own other devices).
+          // encryptFor returns one DeviceCiphertext per active device of the
+          // recipient + one per each of our own other devices (sync copies).
           const ciphertexts = await encryptFor(otherUsername, plaintext);
           pendingSentPlaintexts.current.push(plaintext);
           sendMessage(activeConversationId, ciphertexts, imageUrl);
         } catch (encryptErr) {
-          console.warn("[Signal:WARN] encrypt_failed_fallback_plaintext", { otherUsername, error: String(encryptErr) });
-          // Fallback: send plaintext (no encryption) if encrypt fails.
-          sendMessage(activeConversationId, [], imageUrl, plaintext);
+          console.warn("[Signal:WARN] encrypt_failed", { otherUsername, error: String(encryptErr) });
+          // Don't silently send plaintext — surface the error so the user
+          // knows the message wasn't sent rather than being sent unencrypted.
+          alert("Couldn't send message securely. Please try again.");
         }
-      } else {
-        // Group chat or image-only — no E2EE, use legacy path with plaintext content.
-        sendMessage(activeConversationId, [], imageUrl, inputText.trim() || null);
+      } else if (!otherUsername) {
+        // Group chat — not E2EE yet, falls back to unencrypted server-side.
+        sendMessage(activeConversationId, [], imageUrl);
       }
 
       setInputText("");
