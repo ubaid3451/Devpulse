@@ -125,7 +125,7 @@ function ChatPageContent() {
   const processedMessageIds = useRef<Set<string>>(new Set());
 
   const refreshConversations = () => {
-    getConversations()
+    getConversations(e2eeReady ? (localDeviceIdRef.current ?? undefined) : undefined)
       .then(async (convos) => {
         setConversations(convos);
 
@@ -146,7 +146,8 @@ function ChatPageContent() {
             if (!otherUsername || !convo.last_message || convo.last_message_msg_type == null) return;
 
             try {
-              const plaintext = await decryptFrom(otherUsername, {
+              const senderDeviceId = convo.last_message_sender_device_id ?? 1;
+              const plaintext = await decryptFrom(otherUsername, senderDeviceId, {
                 content: convo.last_message,
                 msg_type: Number(convo.last_message_msg_type),
               }, convo.conversation_id);

@@ -237,6 +237,7 @@ export interface ConversationResponse {
   last_message_msg_type?: string | null;
   last_message_encrypted?: boolean;
   last_message_at?: string;
+  last_message_sender_device_id?: number;
   updated_at?: string;
 }
 
