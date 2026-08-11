@@ -30,6 +30,7 @@ import {
 
 interface E2EEContextValue {
   isReady: boolean;
+  myDeviceId: number;
   encryptFor: (otherUsername: string, plaintext: string) => Promise<DeviceCiphertext[]>;
   decryptFrom: (
     otherUsername: string,
@@ -46,6 +47,7 @@ const E2EEContext = createContext<E2EEContextValue | null>(null);
 export function E2EEProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [isReady, setIsReady] = useState(false);
+  const [myDeviceId, setMyDeviceId] = useState<number>(1);
 
   useEffect(() => {
     if (!user) {
@@ -57,7 +59,11 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         await ensureIdentitySetUp(user.id);
-        if (!cancelled) setIsReady(true);
+        if (!cancelled) {
+          const deviceId = await getMyLocalDeviceId(user.id);
+          setMyDeviceId(deviceId);
+          setIsReady(true);
+        }
       } catch (err) {
         console.error("Signal Protocol setup failed", err);
       }
@@ -97,6 +103,7 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
     <E2EEContext.Provider
       value={{
         isReady,
+        myDeviceId,
         encryptFor,
         decryptFrom,
         forceSessionReset: handleForceSessionReset,

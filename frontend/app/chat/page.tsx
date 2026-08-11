@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useChatSocket } from "@/lib/chat-socket-context";
 import { useE2EE } from "@/lib/e2ee-context";
-import { getMyLocalDeviceId } from "@/lib/signal-e2ee";
 import { cacheMessagePlaintext, getCachedMessagePlaintext } from "@/lib/message-plaintext-cache";
 import { requestNotificationPermission, showDesktopNotification, isTabHidden } from "@/lib/notifications";
 import AppLayout from "@/components/AppLayout";
@@ -31,7 +30,7 @@ function ChatPageContent() {
   const { user: currentUser } = useAuth();
   const { onlineUsers, sendMessage, sendReaction, onChatMessage, onReactionUpdate, onMessagesRead, onSessionReset } =
     useChatSocket();
-  const { isReady: e2eeReady, encryptFor, decryptFrom, forceSessionResetAllDevices } = useE2EE();
+  const { isReady: e2eeReady, myDeviceId, encryptFor, decryptFrom, forceSessionResetAllDevices } = useE2EE();
 
   const [conversations, setConversations] = useState<ConversationResponse[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -78,24 +77,16 @@ function ChatPageContent() {
   const pendingSentPlaintexts = useRef<string[]>([]);
   const conversationsRef = useRef<ConversationResponse[]>([]);
   const activeConversationIdRef = useRef<string | null>(null);
-  // This browser's Signal Protocol device id — populated once e2eeReady
-  // flips true. Used to tag REST calls so the backend returns THIS device's
-  // ciphertext rows rather than another device's.
+  // This browser's Signal Protocol device id — from E2EE context, set once
+  // ensureIdentitySetUp finishes. Used to tag REST calls so the backend
+  // returns THIS device's ciphertext rows rather than another device's.
   const myDeviceIdRef = useRef<number>(1);
+  useEffect(() => { myDeviceIdRef.current = myDeviceId; }, [myDeviceId]);
 
-  useEffect(() => {
-    conversationsRef.current = conversations;
-  }, [conversations]);
-  useEffect(() => {
-    activeConversationIdRef.current = activeConversationId;
-  }, [activeConversationId]);
+  useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
+  useEffect(() => { activeConversationIdRef.current = activeConversationId; }, [activeConversationId]);
 
   const [decryptedPreviews, setDecryptedPreviews] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!currentUser || !e2eeReady) return;
-    getMyLocalDeviceId(currentUser.id).then((id) => { myDeviceIdRef.current = id; });
-  }, [currentUser, e2eeReady]);
 
   // Track processed message IDs to prevent double-decryption on WebSocket reconnect/replay
   const processedMessageIds = useRef<Set<string>>(new Set());
@@ -123,7 +114,8 @@ function ChatPageContent() {
 
             // Own message we don't have a cached plaintext for = sent from
             // another device — can't decrypt it here.
-            if (convo.last_message_sender_id === currentUser.id) {
+            const lastMessageSenderId = (convo as any).last_message_sender_id;
+            if (lastMessageSenderId === currentUser.id) {
               previews[convo.conversation_id] = "[Sent from another device]";
               return;
             }
@@ -343,8 +335,8 @@ function ChatPageContent() {
         const senderName =
           msgConvo?.is_group
             ? msgConvo.participants.find((p) => p.id === msg.sender_id)?.full_name
-            || msgConvo.participants.find((p) => p.id === msg.sender_id)?.username
-            || "Someone"
+              || msgConvo.participants.find((p) => p.id === msg.sender_id)?.username
+              || "Someone"
             : msgConvo?.participants[0]?.full_name || msgConvo?.participants[0]?.username || "Someone";
 
         showDesktopNotification({
@@ -503,8 +495,9 @@ function ChatPageContent() {
     <AppLayout activeNav="messages">
       <div className="flex flex-1 overflow-hidden bg-surface text-on-surface w-full h-full">
         {/* Conversations Sidebar — full screen on mobile when no convo is active, hidden otherwise */}
-        <div className={`${activeConversationId ? 'hidden md:flex' : 'flex'
-          } md:flex flex-col md:w-72 lg:w-80 w-full shrink-0 border-r border-outline-variant bg-[#111318]`}>
+        <div className={`${
+          activeConversationId ? 'hidden md:flex' : 'flex'
+        } md:flex flex-col md:w-72 lg:w-80 w-full shrink-0 border-r border-outline-variant bg-[#111318]`}>
           <div className="p-4 flex items-center justify-between border-b border-outline-variant/30">
             <h2 className="font-headline-sm text-headline-sm font-bold">Chats</h2>
             <button
@@ -561,10 +554,10 @@ function ChatPageContent() {
             ) : (
               <>
                 {conversations.filter((conv) => {
-                  // Hide conversations where the other user was deleted (no participants left)
-                  if (!conv.is_group && (!conv.participants[0] || !conv.participants[0].username)) return false;
-                  return true;
-                }).map((conv) => {
+                    // Hide conversations where the other user was deleted (no participants left)
+                    if (!conv.is_group && (!conv.participants[0] || !conv.participants[0].username)) return false;
+                    return true;
+                  }).map((conv) => {
                   const other = conv.participants[0];
                   const title = conv.is_group ? conv.name || "Group chat" : other?.full_name || other?.username;
                   const avatar = conv.is_group ? null : other?.avatar_url;
@@ -577,8 +570,9 @@ function ChatPageContent() {
                   return (
                     <div
                       key={conv.conversation_id}
-                      className={`group relative p-3 mx-2 my-1 rounded-lg transition-colors flex items-center gap-3 ${isActive ? "bg-[#1e2025]" : "hover:bg-[#1e2025]/50"
-                        } ${isBlocked ? 'opacity-60' : ''}`}
+                      className={`group relative p-3 mx-2 my-1 rounded-lg transition-colors flex items-center gap-3 ${
+                        isActive ? "bg-[#1e2025]" : "hover:bg-[#1e2025]/50"
+                      } ${isBlocked ? 'opacity-60' : ''}`}
                     >
                       <div
                         onClick={() => setActiveConversationId(conv.conversation_id)}
@@ -655,8 +649,9 @@ function ChatPageContent() {
                             e.stopPropagation();
                             setOpenMenuId(isMenuOpen ? null : conv.conversation_id);
                           }}
-                          className={`rounded-lg p-1.5 text-on-surface-variant transition-colors hover:bg-white/10 hover:text-white ${isMenuOpen ? "bg-white/10 text-white" : "opacity-0 group-hover:opacity-100"
-                            }`}
+                          className={`rounded-lg p-1.5 text-on-surface-variant transition-colors hover:bg-white/10 hover:text-white ${
+                            isMenuOpen ? "bg-white/10 text-white" : "opacity-0 group-hover:opacity-100"
+                          }`}
                         >
                           <span className="material-symbols-outlined text-[18px]">more_vert</span>
                         </button>
@@ -718,8 +713,9 @@ function ChatPageContent() {
         </div>
 
         {/* Chat Area — shown on mobile only when a conversation is active */}
-        <div className={`${activeConversationId ? 'flex' : 'hidden md:flex'
-          } flex-1 flex-col bg-[#0b0d10] relative min-w-0`}>
+        <div className={`${
+          activeConversationId ? 'flex' : 'hidden md:flex'
+        } flex-1 flex-col bg-[#0b0d10] relative min-w-0`}>
           {isResolvingConversation ? (
             <div className="flex-1 flex items-center justify-center text-on-surface-variant/50">
               <p className="text-title-lg font-medium">Loading conversation...</p>
@@ -826,10 +822,11 @@ function ChatPageContent() {
                             </button>
                           )}
                           <div
-                            className={`px-4 py-2.5 rounded-2xl relative ${isMine
-                              ? "bg-[#71d4ff] text-[#003548] rounded-br-sm"
-                              : "bg-[#1e2025] text-on-surface border border-outline-variant/20 rounded-bl-sm"
-                              }`}
+                            className={`px-4 py-2.5 rounded-2xl relative ${
+                              isMine
+                                ? "bg-[#71d4ff] text-[#003548] rounded-br-sm"
+                                : "bg-[#1e2025] text-on-surface border border-outline-variant/20 rounded-bl-sm"
+                            }`}
                           >
                             {msg.image_url && (
                               <img src={msg.image_url} alt="Attachment" className="max-w-full rounded-lg mb-2 max-h-64 object-cover" />
@@ -878,8 +875,9 @@ function ChatPageContent() {
                           {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           {isMine && (
                             <span
-                              className={`material-symbols-outlined text-[14px] ${msg.is_read ? "text-[#71d4ff]" : "text-on-surface-variant/60"
-                                }`}
+                              className={`material-symbols-outlined text-[14px] ${
+                                msg.is_read ? "text-[#71d4ff]" : "text-on-surface-variant/60"
+                              }`}
                             >
                               done_all
                             </span>
