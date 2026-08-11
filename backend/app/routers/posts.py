@@ -12,6 +12,7 @@ from app.models.post import Post, Comment, Like
 from app.models.user import User
 from app.models.follow import Follow
 from app.models.block import Block
+from app.services import cloudinary_service
 from app.schemas.post import (
     PostCreate, PostUpdate, PostResponse,
     CommentCreate, CommentResponse, PostDetailResponse
@@ -145,15 +146,11 @@ def create_post(
     image: UploadFile = File(None)
 ):
     image_url = None
-    if image:
-        uploads_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
-        os.makedirs(uploads_dir, exist_ok=True)
-        ext = os.path.splitext(image.filename)[1] if image.filename else ""
-        filename = f"{uuid.uuid4().hex}{ext}"
-        filepath = os.path.join(uploads_dir, filename)
-        with open(filepath, "wb") as buffer:
-            shutil.copyfileobj(image.file, buffer)
-        image_url = f"{settings.public_backend_url}/uploads/{filename}"
+    if image and image.filename:
+        try:
+            image_url = cloudinary_service.upload_post_image(image)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     post = Post(
         title=title,
