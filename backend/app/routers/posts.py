@@ -331,6 +331,8 @@ def add_comment(
 
     return comment
 
+from sqlalchemy import func
+
 
 @router.post("/{post_id}/like", status_code=status.HTTP_200_OK)
 def toggle_like(
@@ -338,23 +340,46 @@ def toggle_like(
     current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
-    post = db.execute(select(Post).where(Post.id == post_id)).scalar_one_or_none()
+    post = db.execute(
+        select(Post).where(Post.id == post_id)
+    ).scalar_one_or_none()
+
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
     existing_like = db.execute(
-        select(Like).where(Like.post_id == post_id, Like.user_id == current_user.id)
+        select(Like).where(
+            Like.post_id == post_id,
+            Like.user_id == current_user.id
+        )
     ).scalar_one_or_none()
 
     if existing_like:
         db.delete(existing_like)
         db.commit()
-        return {"liked": False}
+
+        liked = False
+
     else:
-        new_like = Like(post_id=post_id, user_id=current_user.id)
+        new_like = Like(
+            post_id=post_id,
+            user_id=current_user.id
+        )
         db.add(new_like)
         db.commit()
-        return {"liked": True}
+
+        liked = True
+
+    likes_count = db.execute(
+        select(func.count(Like.id)).where(
+            Like.post_id == post_id
+        )
+    ).scalar_one()
+
+    return {
+        "is_liked": liked,
+        "likes_count": likes_count
+    }
 
 
 @router.post("/{post_id}/repost", status_code=status.HTTP_200_OK)
