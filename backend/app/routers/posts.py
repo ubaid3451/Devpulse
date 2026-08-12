@@ -1,26 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status, File, Form, UploadFile
 from sqlalchemy import select, desc, delete
-import os
-import uuid
-import shutil
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
-from app.core.config import get_settings
 from app.models.post import Post, Comment, Like
 from app.models.user import User
 from app.models.follow import Follow
 from app.models.block import Block
-from app.services import cloudinary_service
+from app.services.cloudinary_service import upload_post_image
 from app.schemas.post import (
     PostCreate, PostUpdate, PostResponse,
     CommentCreate, CommentResponse, PostDetailResponse
 )
 
 router = APIRouter(prefix="/posts", tags=["posts"])
-
-settings = get_settings()
 
 
 def _post_to_dict(post: Post, current_user_id: str) -> dict:
@@ -146,11 +140,8 @@ def create_post(
     image: UploadFile = File(None)
 ):
     image_url = None
-    if image and image.filename:
-        try:
-            image_url = cloudinary_service.upload_post_image(image)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+    if image:
+        image_url = upload_post_image(image)
 
     post = Post(
         title=title,
