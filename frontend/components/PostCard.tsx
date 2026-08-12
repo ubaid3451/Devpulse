@@ -77,8 +77,10 @@ export default function PostCard({ post, onPostUpdate, onLikeToggle, onEdit }: P
     try {
       const res = await toggleLike(displayPost.id);
       // Confirm with server values (handles edge cases like double-clicks)
-      setIsLiked(res.is_liked);
-      setLikesCount(res.likes_count);
+      const serverLiked = res.is_liked ?? (res as any).liked ?? newIsLiked;
+      const serverCount = res.likes_count ?? newLikesCount;
+      setIsLiked(serverLiked);
+      setLikesCount(serverCount);
     } catch (err) {
       // Roll back on failure
       setIsLiked(!newIsLiked);

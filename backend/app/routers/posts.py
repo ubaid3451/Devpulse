@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status, File, Form, UploadFile
-from sqlalchemy import select, desc, delete
+from sqlalchemy import select, desc, delete, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
@@ -373,12 +373,22 @@ def toggle_like(
     if existing_like:
         db.delete(existing_like)
         db.commit()
-        return {"liked": False}
+        liked = False
     else:
         new_like = Like(post_id=post_id, user_id=current_user.id)
         db.add(new_like)
         db.commit()
-        return {"liked": True}
+        liked = True
+
+    likes_count = db.execute(
+        select(func.count(Like.id)).where(Like.post_id == post_id)
+    ).scalar_one()
+
+    return {
+        "liked": liked,
+        "is_liked": liked,
+        "likes_count": likes_count,
+    }
 
 
 @router.post("/{post_id}/repost", status_code=status.HTTP_200_OK)
