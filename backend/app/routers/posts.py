@@ -18,6 +18,25 @@ router = APIRouter(prefix="/posts", tags=["posts"])
 
 
 def _post_to_dict(post: Post, current_user_id: str) -> dict:
+    original = None
+    if post.original_post:
+        original = {
+            "id": post.original_post.id,
+            "title": post.original_post.title,
+            "content": post.original_post.content,
+            "image_url": post.original_post.image_url,
+            "author_id": post.original_post.author_id,
+            "created_at": post.original_post.created_at,
+            "updated_at": post.original_post.updated_at,
+            "author": post.original_post.author,
+            "likes_count": len(post.original_post.likes) if post.original_post.likes else 0,
+            "comments_count": len(post.original_post.comments) if post.original_post.comments else 0,
+            "is_liked": any(like.user_id == current_user_id for like in (post.original_post.likes or [])),
+            "is_reposted": any(r.author_id == current_user_id for r in (post.original_post.reposts or [])),
+            "repost_id": post.original_post.repost_id,
+            "original_post": None,
+            "is_archived": post.original_post.is_archived,
+        }
     return {
         "id": post.id,
         "title": post.title,
@@ -31,7 +50,7 @@ def _post_to_dict(post: Post, current_user_id: str) -> dict:
         "is_liked": any(like.user_id == current_user_id for like in post.likes),
         "is_reposted": any(repost.author_id == current_user_id for repost in post.reposts),
         "repost_id": post.repost_id,
-        "original_post": post.original_post,
+        "original_post": original,
         "image_url": post.image_url,
         "is_archived": post.is_archived,
     }
@@ -53,6 +72,7 @@ def get_posts(
             joinedload(Post.likes),
             joinedload(Post.comments),
             joinedload(Post.original_post).joinedload(Post.author),
+            joinedload(Post.original_post).joinedload(Post.reposts),
             joinedload(Post.reposts)
         )
         .order_by(desc(Post.created_at))
@@ -185,6 +205,7 @@ def get_post(
             joinedload(Post.likes),
             joinedload(Post.comments).joinedload(Comment.author),
             joinedload(Post.original_post).joinedload(Post.author),
+            joinedload(Post.original_post).joinedload(Post.reposts),
             joinedload(Post.reposts)
         )
         .where(Post.id == post_id)
@@ -228,6 +249,7 @@ def update_post(
             joinedload(Post.likes),
             joinedload(Post.comments),
             joinedload(Post.original_post).joinedload(Post.author),
+            joinedload(Post.original_post).joinedload(Post.reposts),
             joinedload(Post.reposts)
         )
         .where(Post.id == post_id)
@@ -262,6 +284,7 @@ def archive_post(
             joinedload(Post.likes),
             joinedload(Post.comments),
             joinedload(Post.original_post).joinedload(Post.author),
+            joinedload(Post.original_post).joinedload(Post.reposts),
             joinedload(Post.reposts)
         )
         .where(Post.id == post_id)
@@ -292,6 +315,7 @@ def unarchive_post(
             joinedload(Post.likes),
             joinedload(Post.comments),
             joinedload(Post.original_post).joinedload(Post.author),
+            joinedload(Post.original_post).joinedload(Post.reposts),
             joinedload(Post.reposts)
         )
         .where(Post.id == post_id)
@@ -331,8 +355,6 @@ def add_comment(
 
     return comment
 
-from sqlalchemy import func
-
 
 @router.post("/{post_id}/like", status_code=status.HTTP_200_OK)
 def toggle_like(
@@ -340,46 +362,23 @@ def toggle_like(
     current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
-    post = db.execute(
-        select(Post).where(Post.id == post_id)
-    ).scalar_one_or_none()
-
+    post = db.execute(select(Post).where(Post.id == post_id)).scalar_one_or_none()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
     existing_like = db.execute(
-        select(Like).where(
-            Like.post_id == post_id,
-            Like.user_id == current_user.id
-        )
+        select(Like).where(Like.post_id == post_id, Like.user_id == current_user.id)
     ).scalar_one_or_none()
 
     if existing_like:
         db.delete(existing_like)
         db.commit()
-
-        liked = False
-
+        return {"liked": False}
     else:
-        new_like = Like(
-            post_id=post_id,
-            user_id=current_user.id
-        )
+        new_like = Like(post_id=post_id, user_id=current_user.id)
         db.add(new_like)
         db.commit()
-
-        liked = True
-
-    likes_count = db.execute(
-        select(func.count(Like.id)).where(
-            Like.post_id == post_id
-        )
-    ).scalar_one()
-
-    return {
-        "is_liked": liked,
-        "likes_count": likes_count
-    }
+        return {"liked": True}
 
 
 @router.post("/{post_id}/repost", status_code=status.HTTP_200_OK)
