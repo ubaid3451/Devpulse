@@ -190,7 +190,13 @@ export default function FeedPage() {
           </div>
         ) : (
           posts.map(post => (
-            <PostCard key={post.id} post={post} onLikeToggle={fetchPosts} />
+            <PostCard
+              key={post.id}
+              post={post}
+              onPostUpdate={(updated) =>
+                setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
+              }
+            />
           ))
         )}
       </div>

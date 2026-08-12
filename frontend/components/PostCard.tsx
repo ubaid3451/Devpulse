@@ -25,11 +25,12 @@ function timeAgo(dateString: string) {
 
 interface PostCardProps {
   post: PostResponse;
-  onLikeToggle?: () => void;
-  onEdit?: (post: PostResponse) => void; // opens the edit modal in the parent
+  onPostUpdate?: (updatedPost: PostResponse) => void; // targeted in-place update
+  onLikeToggle?: () => void; // legacy: full refetch (still supported, prefer onPostUpdate)
+  onEdit?: (post: PostResponse) => void;
 }
 
-export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) {
+export default function PostCard({ post, onPostUpdate, onLikeToggle, onEdit }: PostCardProps) {
   const { user } = useAuth();
   const router = useRouter();
   const displayPost = post.original_post || post;
@@ -56,10 +57,11 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
   const handleLike = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    
+
     const newIsLiked = !isLiked;
     const newLikesCount = newIsLiked ? likesCount + 1 : Math.max(0, likesCount - 1);
-    
+
+    // Optimistic update
     setIsLiked(newIsLiked);
     setLikesCount(newLikesCount);
 
@@ -67,10 +69,21 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
       const res = await toggleLike(displayPost.id);
       setIsLiked(res.is_liked);
       setLikesCount(res.likes_count);
-      if (onLikeToggle) {
+
+      // Notify parent with the confirmed server values so the list stays in
+      // sync without a full refetch. Build the updated post shape that the
+      // parent's setPosts can merge in-place.
+      if (onPostUpdate) {
+        const updatedDisplay = { ...displayPost, is_liked: res.is_liked, likes_count: res.likes_count };
+        const updatedPost = post.original_post
+          ? { ...post, original_post: updatedDisplay }
+          : updatedDisplay;
+        onPostUpdate(updatedPost as PostResponse);
+      } else if (onLikeToggle) {
         onLikeToggle();
       }
     } catch (err) {
+      // Roll back optimistic update
       setIsLiked(!newIsLiked);
       setLikesCount(likesCount);
       console.error("Failed to toggle like", err);
@@ -80,13 +93,21 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
   const handleRepost = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    
+
     const newIsReposted = !isReposted;
     setIsReposted(newIsReposted);
 
     try {
-      await repostPost(displayPost.id);
-      if (onLikeToggle) {
+      const res = await repostPost(displayPost.id);
+
+      if (onPostUpdate) {
+        // res is the new repost wrapper — update is_reposted on the display post
+        const updatedDisplay = { ...displayPost, is_reposted: newIsReposted };
+        const updatedPost = post.original_post
+          ? { ...post, original_post: updatedDisplay }
+          : updatedDisplay;
+        onPostUpdate(updatedPost as PostResponse);
+      } else if (onLikeToggle) {
         onLikeToggle();
       }
     } catch (err) {
@@ -279,13 +300,13 @@ export default function PostCard({ post, onLikeToggle, onEdit }: PostCardProps) 
         </div>
 
         {displayPost.content && (
-        <div className="bg-surface-container-highest rounded-lg p-md mb-md border border-outline-variant overflow-x-auto">
-          <pre className="font-code-block text-code-block">
-            <code className="text-on-surface-variant whitespace-pre-wrap">
-              {displayPost.content}
-            </code>
-          </pre>
-        </div>
+          <div className="bg-surface-container-highest rounded-lg p-md mb-md border border-outline-variant overflow-x-auto">
+            <pre className="font-code-block text-code-block">
+              <code className="text-on-surface-variant whitespace-pre-wrap">
+                {displayPost.content}
+              </code>
+            </pre>
+          </div>
         )}
 
         {displayPost.image_url && (

@@ -80,15 +80,18 @@ export default function PostDetailPage({ params }: { params: { id: string } }) {
       </header>
 
       <main className="max-w-3xl mx-auto p-3 sm:p-md lg:p-lg space-y-md sm:space-y-lg pb-16">
-        <PostCard post={post} onLikeToggle={fetchPost} />
+        <PostCard
+          post={post}
+          onPostUpdate={(updated) => setPost((prev) => prev ? { ...prev, ...updated } : prev)}
+        />
 
         <div className="bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg">
           <h3 className="font-headline-sm text-headline-sm mb-md">Comments ({post.comments.length})</h3>
-          
+
           <form onSubmit={handleCommentSubmit} className="mb-lg flex gap-3">
             <div className="w-10 h-10 rounded-lg overflow-hidden border border-outline-variant bg-surface-container-highest flex shrink-0 items-center justify-center">
               {user?.avatar_url ? (
-                 <img src={user.avatar_url} alt="avatar" className="w-full h-full object-cover" />
+                <img src={user.avatar_url} alt="avatar" className="w-full h-full object-cover" />
               ) : (
                 <span className="text-on-surface font-bold text-sm">{(user?.full_name?.substring(0, 2) || user?.username?.substring(0, 2) || "U").toUpperCase()}</span>
               )}
@@ -101,7 +104,7 @@ export default function PostDetailPage({ params }: { params: { id: string } }) {
                 className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-4 py-2 text-body-base focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all resize-none min-h-[80px]"
               />
               <div className="flex justify-end mt-2">
-                <button 
+                <button
                   type="submit"
                   disabled={!commentContent.trim() || isSubmitting}
                   className="px-4 py-1.5 bg-primary text-on-primary font-bold rounded hover:brightness-110 disabled:opacity-50 transition-colors"

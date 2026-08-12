@@ -101,7 +101,7 @@ export default function UserProfilePage({ params }: { params: { username: string
         <div className="bg-surface-container-low border border-outline-variant rounded-xl p-4 sm:p-6 lg:p-8 flex flex-col items-center text-center">
           <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-surface bg-surface-container-highest flex shrink-0 items-center justify-center mb-6 shadow-xl">
             {profile.avatar_url ? (
-               <img src={profile.avatar_url} alt={profile.username} className="w-full h-full object-cover" />
+              <img src={profile.avatar_url} alt={profile.username} className="w-full h-full object-cover" />
             ) : (
               <span className="text-on-surface font-bold text-4xl">{(profile.full_name?.substring(0, 2) || profile.username.substring(0, 2)).toUpperCase()}</span>
             )}
@@ -155,11 +155,10 @@ export default function UserProfilePage({ params }: { params: { username: string
                   <>
                     <button
                       onClick={handleToggleFollow}
-                      className={`px-6 py-2 font-bold rounded-lg transition-colors flex items-center gap-2 ${
-                        profile.is_following || profile.has_pending_request
+                      className={`px-6 py-2 font-bold rounded-lg transition-colors flex items-center gap-2 ${profile.is_following || profile.has_pending_request
                           ? "bg-surface-variant text-on-surface hover:bg-surface-container-high"
                           : "bg-primary text-on-primary hover:brightness-110"
-                      }`}
+                        }`}
                     >
                       {profile.has_pending_request && (
                         <span className="material-symbols-outlined text-[16px]">schedule</span>
@@ -167,10 +166,10 @@ export default function UserProfilePage({ params }: { params: { username: string
                       {profile.is_following
                         ? "Unfollow"
                         : profile.has_pending_request
-                        ? "Requested"
-                        : profile.is_private
-                        ? "Request to Follow"
-                        : "Follow"}
+                          ? "Requested"
+                          : profile.is_private
+                            ? "Request to Follow"
+                            : "Follow"}
                     </button>
                     <button
                       onClick={() => router.push(`/chat?user=${profile.username}`)}
@@ -199,22 +198,20 @@ export default function UserProfilePage({ params }: { params: { username: string
             <div className="flex gap-1">
               <button
                 onClick={() => setActiveTab("posts")}
-                className={`px-4 py-2 text-title-lg font-bold border-b-2 -mb-px transition-colors ${
-                  activeTab === "posts"
+                className={`px-4 py-2 text-title-lg font-bold border-b-2 -mb-px transition-colors ${activeTab === "posts"
                     ? "border-primary text-on-surface"
                     : "border-transparent text-on-surface-variant hover:text-on-surface"
-                }`}
+                  }`}
               >
                 Posts
               </button>
               {isOwnProfile && (
                 <button
                   onClick={() => setActiveTab("archived")}
-                  className={`px-4 py-2 text-title-lg font-bold border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${
-                    activeTab === "archived"
+                  className={`px-4 py-2 text-title-lg font-bold border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${activeTab === "archived"
                       ? "border-primary text-on-surface"
                       : "border-transparent text-on-surface-variant hover:text-on-surface"
-                  }`}
+                    }`}
                 >
                   <span className="material-symbols-outlined text-[18px]">archive</span>
                   Archived
@@ -261,8 +258,8 @@ export default function UserProfilePage({ params }: { params: { username: string
                 {activeTab === "archived"
                   ? "Posts you archive will show up here."
                   : isOwnProfile
-                  ? "You haven't posted anything."
-                  : `@${profile.username} hasn't posted anything.`}
+                    ? "You haven't posted anything."
+                    : `@${profile.username} hasn't posted anything.`}
               </p>
             </div>
           ) : (
@@ -271,7 +268,9 @@ export default function UserProfilePage({ params }: { params: { username: string
                 <PostCard
                   key={post.id}
                   post={post}
-                  onLikeToggle={() => fetchProfileData(activeTab)}
+                  onPostUpdate={(updated) =>
+                    setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
+                  }
                   onEdit={setEditingPost}
                 />
               ))}
