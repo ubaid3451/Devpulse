@@ -268,6 +268,7 @@ export default function UserProfilePage({ params }: { params: { username: string
                 <PostCard
                   key={post.id}
                   post={post}
+                  onLikeToggle={() => fetchProfileData(activeTab)}
                   onPostUpdate={(updated) =>
                     setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
                   }

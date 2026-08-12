@@ -98,6 +98,9 @@ export default function PostCard({ post, onPostUpdate, onLikeToggle, onEdit }: P
       const res = await repostPost(displayPost.id);
       // Confirm with server's actual state — prevents desync from double-clicks etc.
       setIsReposted(res.reposted);
+      if (onLikeToggle) {
+        onLikeToggle();
+      }
     } catch (err) {
       setIsReposted(!newIsReposted); // roll back
       console.error("Failed to repost", err);
