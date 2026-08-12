@@ -474,8 +474,8 @@ export async function toggleLike(id: string): Promise<{ is_liked: boolean; likes
   return apiPost<{ is_liked: boolean; likes_count: number }>(`/posts/${id}/like`);
 }
 
-export async function repostPost(id: string): Promise<PostResponse> {
-  return apiPost<PostResponse>(`/posts/${id}/repost`);
+export async function repostPost(id: string): Promise<{ reposted: boolean }> {
+  return apiPost<{ reposted: boolean }>(`/posts/${id}/repost`);
 }
 
 export async function archivePost(id: string): Promise<PostResponse> {

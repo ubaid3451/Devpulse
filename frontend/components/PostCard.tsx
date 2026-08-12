@@ -109,7 +109,13 @@ export default function PostCard({
     setIsReposted(newIsReposted);
 
     try {
-      await repostPost(displayPost.id);
+      const res = await repostPost(displayPost.id);
+      setIsReposted(res.reposted);
+      const updatedPost: PostResponse = {
+        ...post,
+        is_reposted: res.reposted,
+      };
+      onPostUpdate?.(updatedPost);
     } catch (err) {
       setIsReposted(!newIsReposted);
       console.error("Failed to repost", err);
