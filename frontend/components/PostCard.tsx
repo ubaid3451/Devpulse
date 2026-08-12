@@ -41,12 +41,19 @@ export default function PostCard({ post, onPostUpdate, onLikeToggle, onEdit }: P
   const [isLiked, setIsLiked] = React.useState(displayPost.is_liked || false);
   const [isReposted, setIsReposted] = React.useState(displayPost.is_reposted || false);
 
+  // Sync from parent prop only when the post identity changes (e.g. navigating
+  // to a different post), NOT on every re-render. This prevents the parent's
+  // setPosts() call (triggered by onPostUpdate) from immediately overwriting
+  // the optimistic local state we just set during a like/repost action.
+  const prevPostIdRef = React.useRef(displayPost.id);
   React.useEffect(() => {
-    const target = post.original_post || post;
-    setLikesCount(target.likes_count);
-    setIsLiked(target.is_liked || false);
-    setIsReposted(target.is_reposted || false);
-  }, [post.id, post.original_post?.id]);
+    if (prevPostIdRef.current !== displayPost.id) {
+      prevPostIdRef.current = displayPost.id;
+      setLikesCount(displayPost.likes_count);
+      setIsLiked(displayPost.is_liked || false);
+      setIsReposted(displayPost.is_reposted || false);
+    }
+  });
 
   const isReposter = user?.id === post.author_id;
   const isOriginalAuthor = user?.id === displayPost.author_id;
@@ -61,29 +68,17 @@ export default function PostCard({ post, onPostUpdate, onLikeToggle, onEdit }: P
     const newIsLiked = !isLiked;
     const newLikesCount = newIsLiked ? likesCount + 1 : Math.max(0, likesCount - 1);
 
-    // Optimistic update
+    // Optimistic update — instant UI feedback
     setIsLiked(newIsLiked);
     setLikesCount(newLikesCount);
 
     try {
       const res = await toggleLike(displayPost.id);
+      // Confirm with server values (handles edge cases like double-clicks)
       setIsLiked(res.is_liked);
       setLikesCount(res.likes_count);
-
-      // Notify parent with the confirmed server values so the list stays in
-      // sync without a full refetch. Build the updated post shape that the
-      // parent's setPosts can merge in-place.
-      if (onPostUpdate) {
-        const updatedDisplay = { ...displayPost, is_liked: res.is_liked, likes_count: res.likes_count };
-        const updatedPost = post.original_post
-          ? { ...post, original_post: updatedDisplay }
-          : updatedDisplay;
-        onPostUpdate(updatedPost as PostResponse);
-      } else if (onLikeToggle) {
-        onLikeToggle();
-      }
     } catch (err) {
-      // Roll back optimistic update
+      // Roll back on failure
       setIsLiked(!newIsLiked);
       setLikesCount(likesCount);
       console.error("Failed to toggle like", err);
@@ -98,18 +93,7 @@ export default function PostCard({ post, onPostUpdate, onLikeToggle, onEdit }: P
     setIsReposted(newIsReposted);
 
     try {
-      const res = await repostPost(displayPost.id);
-
-      if (onPostUpdate) {
-        // res is the new repost wrapper — update is_reposted on the display post
-        const updatedDisplay = { ...displayPost, is_reposted: newIsReposted };
-        const updatedPost = post.original_post
-          ? { ...post, original_post: updatedDisplay }
-          : updatedDisplay;
-        onPostUpdate(updatedPost as PostResponse);
-      } else if (onLikeToggle) {
-        onLikeToggle();
-      }
+      await repostPost(displayPost.id);
     } catch (err) {
       setIsReposted(!newIsReposted);
       console.error("Failed to repost", err);
