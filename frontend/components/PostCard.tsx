@@ -104,15 +104,13 @@ export default function PostCard({
   const handleRepost = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-
     try {
       const res = await repostPost(displayPost.id);
-
+      setIsReposted(res.reposted);  // ← add this
       const updatedPost: PostResponse = {
         ...post,
         is_reposted: res.reposted,
       };
-
       onPostUpdate?.(updatedPost);
     } catch (err) {
       console.error("Failed to repost", err);
