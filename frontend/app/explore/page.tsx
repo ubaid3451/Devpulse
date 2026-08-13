@@ -5,7 +5,7 @@ import Link from "next/link";
 import { getExploreUsers, toggleFollow, ExploreUser } from "@/lib/api";
 import AppLayout from "@/components/AppLayout";
 
-const PAGE_SIZE = 6;
+const PAGE_SIZE = 20;
 
 export default function ExplorePage() {
   const [users, setUsers] = useState<ExploreUser[]>([]);
@@ -70,10 +70,9 @@ export default function ExplorePage() {
     return () => clearTimeout(timer);
   }, [searchQuery, loadMore]);
 
-  // Infinite scroll — IntersectionObserver bound to scroll container
+  // Infinite scroll — IntersectionObserver on sentinel
   useEffect(() => {
     const target = observerTarget.current;
-    const root = containerRef.current;
     if (!target) return;
 
     const observer = new IntersectionObserver(
@@ -82,30 +81,42 @@ export default function ExplorePage() {
           loadMore(false);
         }
       },
-      { root: root || undefined, threshold: 0.1, rootMargin: "300px" }
+      { threshold: 0, rootMargin: "400px" }
     );
 
     observer.observe(target);
     return () => observer.disconnect();
   }, [loadMore]);
 
-  // Infinite scroll — Container scroll listener fallback
+  // Infinite scroll — Combined Container & Window scroll listeners
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
     const handleScroll = () => {
-      if (
-        el.scrollTop + el.clientHeight >= el.scrollHeight - 300 &&
-        hasMoreRef.current &&
-        !isLoadingRef.current
-      ) {
+      if (isLoadingRef.current || !hasMoreRef.current) return;
+
+      const container = containerRef.current;
+      if (container && container.scrollHeight > 0) {
+        const containerAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 400;
+        if (containerAtBottom) {
+          loadMore(false);
+          return;
+        }
+      }
+
+      const docHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+      const windowAtBottom = window.innerHeight + window.scrollY >= docHeight - 400;
+      if (windowAtBottom) {
         loadMore(false);
       }
     };
 
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
+    const container = containerRef.current;
+    if (container) container.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => {
+      if (container) container.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("scroll", handleScroll);
+    };
   }, [loadMore]);
 
   const handleFollowClick = async (user: ExploreUser) => {

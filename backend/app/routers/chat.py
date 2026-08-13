@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, File, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select, or_, and_
+from sqlalchemy import select, or_, and_, delete, func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -286,6 +286,60 @@ def create_group_conversation(
     member_ids = [u.id for u in members]
     convo = chat_history.create_group_conversation(db, current_user.id, member_ids, body.name.strip())
     return {"conversation_id": convo.id, "is_group": convo.is_group, "name": convo.name}
+
+
+@router.delete("/conversations/{conversation_id}")
+def delete_conversation(
+    conversation_id: str,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    from app.models.conversation import Conversation
+    from app.models.message import Message
+    from app.models.message_ciphertext import MessageCiphertext
+
+    participant = db.execute(
+        select(ConversationParticipant).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.user_id == current_user.id
+        )
+    ).scalar_one_or_none()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Delete participant entry for current user
+    db.delete(participant)
+
+    # Delete MessageCiphertext rows sent to this user for this conversation
+    msg_ids = db.execute(
+        select(Message.id).where(Message.conversation_id == conversation_id)
+    ).scalars().all()
+    if msg_ids:
+        db.execute(
+            delete(MessageCiphertext).where(
+                MessageCiphertext.recipient_user_id == current_user.id,
+                MessageCiphertext.message_id.in_(msg_ids)
+            )
+        )
+
+    # Check if there are any remaining participants in this conversation
+    remaining_participants = db.execute(
+        select(func.count(ConversationParticipant.id)).where(
+            ConversationParticipant.conversation_id == conversation_id
+        )
+    ).scalar_one()
+
+    # If no participants left, delete the conversation (cascades and deletes all messages)
+    if remaining_participants == 0:
+        convo = db.execute(
+            select(Conversation).where(Conversation.id == conversation_id)
+        ).scalar_one_or_none()
+        if convo:
+            db.delete(convo)
+
+    db.commit()
+    return {"message": "Conversation deleted successfully"}
 
 
 @router.get("/{conversation_id}")
