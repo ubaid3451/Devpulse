@@ -68,15 +68,15 @@ export default function MyProfilePage() {
     }
   };
 
-  const handleTogglePrivacy = async () => {
-    const newValue = !isPrivate;
+  const handleSetPrivacy = async (targetIsPrivate: boolean) => {
+    if (isPrivate === targetIsPrivate || isTogglingPrivacy) return;
     setIsTogglingPrivacy(true);
     setMessage("");
     try {
-      await updatePrivacy(newValue);
-      setIsPrivate(newValue);
+      await updatePrivacy(targetIsPrivate);
+      setIsPrivate(targetIsPrivate);
       setMessage(
-        newValue
+        targetIsPrivate
           ? "Your account is now private. New followers will need your approval."
           : "Your account is now public. Anyone can follow you instantly."
       );
@@ -85,6 +85,10 @@ export default function MyProfilePage() {
     } finally {
       setIsTogglingPrivacy(false);
     }
+  };
+
+  const handleTogglePrivacy = async () => {
+    await handleSetPrivacy(!isPrivate);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -126,38 +130,70 @@ export default function MyProfilePage() {
           </div>
         )}
 
-        {/* Privacy Settings — separate card, saves immediately (not tied to the main form's Save button) */}
-        <div className="bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="material-symbols-outlined text-[20px] text-on-surface-variant">
-                  {isPrivate ? "lock" : "public"}
-                </span>
-                <label className="text-label-lg font-bold text-on-surface">
-                  {isPrivate ? "Private Account" : "Public Account"}
-                </label>
-              </div>
-              <p className="text-body-sm text-on-surface-variant">
-                {isPrivate
-                  ? "New followers must be approved by you before they can see your posts."
-                  : "Anyone can follow you and see your posts instantly."}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleTogglePrivacy}
-              disabled={isTogglingPrivacy}
-              className={`relative w-14 h-8 rounded-full transition-colors shrink-0 disabled:opacity-50 ${
-                isPrivate ? "bg-primary" : "bg-surface-variant"
-              }`}
+        {/* Account Privacy Options — Two Checkable Options */}
+        <div className="bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg space-y-4">
+          <div>
+            <h3 className="text-label-lg font-bold text-on-surface mb-1 flex items-center gap-2">
+              <span className="material-symbols-outlined text-[20px] text-on-surface-variant">security</span>
+              Account Privacy
+            </h3>
+            <p className="text-body-sm text-on-surface-variant">Choose how users can follow you and view your activity.</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Public Account Option */}
+            <div
+              onClick={() => handleSetPrivacy(false)}
+              className={`cursor-pointer p-4 rounded-xl border transition-all flex items-start gap-3 ${
+                !isPrivate
+                  ? "border-primary bg-primary/10 shadow-sm"
+                  : "border-outline-variant bg-surface-container-lowest hover:border-outline"
+              } ${isTogglingPrivacy ? "opacity-50 cursor-wait" : ""}`}
             >
-              <span
-                className={`absolute top-1 left-1 w-6 h-6 bg-white rounded-full shadow-md transition-transform ${
-                  isPrivate ? "translate-x-6" : "translate-x-0"
-                }`}
+              <input
+                type="radio"
+                name="privacy"
+                checked={!isPrivate}
+                onChange={() => handleSetPrivacy(false)}
+                className="mt-1 accent-primary cursor-pointer"
               />
-            </button>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 font-bold text-on-surface text-sm">
+                  <span className="material-symbols-outlined text-[18px] text-primary">public</span>
+                  Public Account
+                </div>
+                <p className="text-xs text-on-surface-variant leading-relaxed">
+                  Anyone can follow you and see your posts instantly.
+                </p>
+              </div>
+            </div>
+
+            {/* Private Account Option */}
+            <div
+              onClick={() => handleSetPrivacy(true)}
+              className={`cursor-pointer p-4 rounded-xl border transition-all flex items-start gap-3 ${
+                isPrivate
+                  ? "border-primary bg-primary/10 shadow-sm"
+                  : "border-outline-variant bg-surface-container-lowest hover:border-outline"
+              } ${isTogglingPrivacy ? "opacity-50 cursor-wait" : ""}`}
+            >
+              <input
+                type="radio"
+                name="privacy"
+                checked={isPrivate}
+                onChange={() => handleSetPrivacy(true)}
+                className="mt-1 accent-primary cursor-pointer"
+              />
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 font-bold text-on-surface text-sm">
+                  <span className="material-symbols-outlined text-[18px] text-primary">lock</span>
+                  Private Account
+                </div>
+                <p className="text-xs text-on-surface-variant leading-relaxed">
+                  New followers must be approved by you before seeing posts.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
