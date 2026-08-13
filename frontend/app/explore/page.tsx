@@ -16,6 +16,7 @@ export default function ExplorePage() {
   const [processingUsername, setProcessingUsername] = useState<string | null>(null);
 
   const observerTarget = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Synchronous loading locks and cursor tracking in refs
   const skipRef = useRef(0);
@@ -69,9 +70,10 @@ export default function ExplorePage() {
     return () => clearTimeout(timer);
   }, [searchQuery, loadMore]);
 
-  // Infinite scroll — IntersectionObserver on sentinel
+  // Infinite scroll — IntersectionObserver bound to scroll container
   useEffect(() => {
     const target = observerTarget.current;
+    const root = containerRef.current;
     if (!target) return;
 
     const observer = new IntersectionObserver(
@@ -80,26 +82,30 @@ export default function ExplorePage() {
           loadMore(false);
         }
       },
-      { threshold: 0.1, rootMargin: "200px" }
+      { root: root || undefined, threshold: 0.1, rootMargin: "300px" }
     );
 
     observer.observe(target);
     return () => observer.disconnect();
   }, [loadMore]);
 
-  // Infinite scroll — Window scroll listener fallback
+  // Infinite scroll — Container scroll listener fallback
   useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
     const handleScroll = () => {
       if (
-        window.innerHeight + window.scrollY >= document.body.offsetHeight - 400 &&
+        el.scrollTop + el.clientHeight >= el.scrollHeight - 300 &&
         hasMoreRef.current &&
         !isLoadingRef.current
       ) {
         loadMore(false);
       }
     };
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
   }, [loadMore]);
 
   const handleFollowClick = async (user: ExploreUser) => {
@@ -134,7 +140,7 @@ export default function ExplorePage() {
 
   return (
     <AppLayout activeNav="explore">
-      <div className="bg-surface text-on-surface min-h-screen">
+      <div ref={containerRef} className="bg-surface text-on-surface flex-1 h-full overflow-y-auto">
         <header className="sticky top-0 z-50 bg-surface/95 backdrop-blur border-b border-outline-variant px-md py-3">
           <div className="max-w-2xl mx-auto flex items-center gap-3">
             <div className="relative flex-1">
