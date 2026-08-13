@@ -521,8 +521,13 @@ export async function createGroupConversation(name: string, participantUsernames
 export async function hideConversation(conversationId: string): Promise<{ message: string }> {
   try {
     return await apiDelete<{ message: string }>(`/chat/conversations/${conversationId}`);
-  } catch (_) {
-    return { message: "hidden" };
+  } catch (err) {
+    try {
+      return await apiDelete<{ message: string }>(`/chat/${conversationId}`);
+    } catch (err2) {
+      console.error("Failed to delete conversation on server:", err2);
+      return { message: "hidden" };
+    }
   }
 }
 

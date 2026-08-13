@@ -289,6 +289,7 @@ def create_group_conversation(
 
 
 @router.delete("/conversations/{conversation_id}")
+@router.delete("/{conversation_id}")
 def delete_conversation(
     conversation_id: str,
     current_user: CurrentUser,
@@ -306,7 +307,7 @@ def delete_conversation(
     ).scalar_one_or_none()
 
     if not participant:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        return {"message": "Conversation deleted successfully"}
 
     # Delete participant entry for current user
     db.delete(participant)
@@ -331,7 +332,7 @@ def delete_conversation(
     ).scalar_one()
 
     # If no participants left, delete the conversation (cascades and deletes all messages)
-    if remaining_participants == 0:
+    if remaining_participants <= 0:
         convo = db.execute(
             select(Conversation).where(Conversation.id == conversation_id)
         ).scalar_one_or_none()
