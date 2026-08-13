@@ -200,7 +200,7 @@ function ChatPageContent() {
           }
 
           if (msg.sender_id === currentUser?.id) {
-            decrypted.push({ ...msg, content: msg.content || "[Sent from another device]" });
+            decrypted.push({ ...msg, content: msg.content || "[Photo]" });
             continue;
           }
 
