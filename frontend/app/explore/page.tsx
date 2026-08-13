@@ -5,7 +5,7 @@ import Link from "next/link";
 import { getExploreUsers, toggleFollow, ExploreUser } from "@/lib/api";
 import AppLayout from "@/components/AppLayout";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 6;
 
 export default function ExplorePage() {
   const [users, setUsers] = useState<ExploreUser[]>([]);
