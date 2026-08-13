@@ -200,7 +200,7 @@ function ChatPageContent() {
           }
 
           if (msg.sender_id === currentUser?.id) {
-            decrypted.push({ ...msg, content: msg.content || "Photo" });
+            decrypted.push({ ...msg, content: msg.content || "" });
             continue;
           }
 
