@@ -128,6 +128,7 @@ def get_conversations(db: Session, current_user: User) -> List[dict]:
             "unread_count": unread_count,
             "last_message": last_message_content,
             "last_message_id": last_message.id if last_message else None,
+            "last_message_has_image": bool(last_message and last_message.image_url),
             "last_message_sender_id": last_message_sender_id,
             "last_message_msg_type": last_message_msg_type,
             "last_message_encrypted": is_encrypted,

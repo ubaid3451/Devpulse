@@ -105,20 +105,25 @@ function ChatPageContent() {
 
             const cached = getCachedMessagePlaintext(currentUser.id, convo.last_message_id);
             if (cached !== undefined) {
-              previews[convo.conversation_id] = cached;
+              previews[convo.conversation_id] = cached || (convo.last_message_has_image ? "📷 Photo" : "");
               return;
             }
 
-            if (!convo.last_message_encrypted) return;
+            if (!convo.last_message_encrypted) {
+              if (convo.last_message_has_image && !convo.last_message) {
+                previews[convo.conversation_id] = "📷 Photo";
+              }
+              return;
+            }
 
             const otherUsername = convo.participants[0]?.username;
-            if (!otherUsername || !convo.last_message || convo.last_message_msg_type == null) return;
+            if (!otherUsername || convo.last_message_msg_type == null) return;
 
             // Own message we don't have a cached plaintext for = sent from
             // another device — can't decrypt it here.
             const lastMessageSenderId = convo.last_message_sender_id;
             if (lastMessageSenderId === currentUser.id) {
-              previews[convo.conversation_id] = convo.last_message || "[Sent message]";
+              previews[convo.conversation_id] = convo.last_message || (convo.last_message_has_image ? "📷 Photo" : "[Sent message]");
               return;
             }
 
@@ -127,7 +132,7 @@ function ChatPageContent() {
               const plaintext = await decryptFrom(
                 otherUsername,
                 senderDeviceId,
-                { content: convo.last_message, msg_type: Number(convo.last_message_msg_type) },
+                { content: convo.last_message || "", msg_type: Number(convo.last_message_msg_type) },
                 convo.conversation_id
               );
               cacheMessagePlaintext(currentUser.id, convo.last_message_id, plaintext);
@@ -645,7 +650,7 @@ function ChatPageContent() {
                               ? decryptedPreviews[conv.conversation_id]
                               : conv.last_message_encrypted
                               ? "🔒 Encrypted message"
-                              : conv.last_message || (conv.last_message_id ? "[Message]" : "No messages yet")}
+                              : conv.last_message || (conv.last_message_id ? (conv.last_message_has_image ? "📷 Photo" : "[Message]") : "No messages yet")}
                           </div>
                         </div>
                         {(conv.unread_count ?? 0) > 0 && (

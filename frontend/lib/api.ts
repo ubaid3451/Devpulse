@@ -236,6 +236,7 @@ export interface ConversationResponse {
   unread_count?: number;
   last_message?: string | null;
   last_message_id?: string | null;
+  last_message_has_image?: boolean;
   last_message_msg_type?: string | null;
   last_message_encrypted?: boolean;
   last_message_at?: string;
