@@ -39,23 +39,15 @@ export default function PostCard({ post, onPostUpdate, onLikeToggle, onEdit }: P
 
   const [likesCount, setLikesCount] = React.useState(displayPost.likes_count);
   const [isLiked, setIsLiked] = React.useState(displayPost.is_liked || false);
-  // is_reposted is always on the wrapper post (computed from post.reposts on the
-  // backend), NOT on original_post — so read from `post` directly, not displayPost.
-  const [isReposted, setIsReposted] = React.useState(post.is_reposted || false);
+  const [isReposted, setIsReposted] = React.useState(
+    displayPost.is_reposted || post.is_reposted || false
+  );
 
-  // Sync from parent prop only when the post identity changes (e.g. navigating
-  // to a different post), NOT on every re-render. This prevents the parent's
-  // setPosts() call (triggered by onPostUpdate) from immediately overwriting
-  // the optimistic local state we just set during a like/repost action.
-  const prevPostIdRef = React.useRef(displayPost.id);
   React.useEffect(() => {
-    if (prevPostIdRef.current !== displayPost.id) {
-      prevPostIdRef.current = displayPost.id;
-      setLikesCount(displayPost.likes_count);
-      setIsLiked(displayPost.is_liked || false);
-      setIsReposted(post.is_reposted || false); // use wrapper, not displayPost
-    }
-  });
+    setLikesCount(displayPost.likes_count);
+    setIsLiked(displayPost.is_liked || false);
+    setIsReposted(displayPost.is_reposted || post.is_reposted || false);
+  }, [displayPost.id, displayPost.likes_count, displayPost.is_liked, displayPost.is_reposted, post.is_reposted]);
 
   const isReposter = user?.id === post.author_id;
   const isOriginalAuthor = user?.id === displayPost.author_id;
