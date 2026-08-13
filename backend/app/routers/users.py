@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status, File, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -71,25 +71,30 @@ def explore_users(
     db: Session = Depends(get_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=50),
+    q: str | None = Query(None),
 ):
     blocked_subquery = select(Block.blocked_id).where(Block.blocker_id == current_user.id).union(
         select(Block.blocker_id).where(Block.blocked_id == current_user.id)
     )
 
-    total = db.scalar(
-        select(func.count()).select_from(User).where(
-            User.id != current_user.id,
-            User.id.notin_(blocked_subquery),
+    base_query = select(User).where(
+        User.id != current_user.id,
+        User.id.notin_(blocked_subquery),
+    )
+    if q and q.strip():
+        search = f"%{q.strip()}%"
+        base_query = base_query.where(
+            or_(
+                User.username.ilike(search),
+                User.full_name.ilike(search),
+            )
         )
-    ) or 0
+
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = db.scalar(count_query) or 0
 
     users = db.execute(
-        select(User)
-        .where(
-            User.id != current_user.id,
-            User.id.notin_(blocked_subquery),
-        )
-        .order_by(User.created_at.desc())
+        base_query.order_by(User.created_at.desc())
         .offset(skip)
         .limit(limit)
     ).scalars().all()

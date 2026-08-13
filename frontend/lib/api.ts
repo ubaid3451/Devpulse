@@ -407,8 +407,8 @@ export async function searchUsers(query: string): Promise<AuthorResponse[]> {
   return apiGet<AuthorResponse[]>("/users/search", { q: query });
 }
 
-export async function getExploreUsers(skip = 0, limit = 20): Promise<ExploreUsersResponse> {
-  return apiGet<ExploreUsersResponse>("/users/explore", { skip, limit });
+export async function getExploreUsers(skip = 0, limit = 20, q?: string): Promise<ExploreUsersResponse> {
+  return apiGet<ExploreUsersResponse>("/users/explore", { skip, limit, q: q || undefined });
 }
 
 export async function toggleFollow(username: string): Promise<ToggleFollowStatus> {

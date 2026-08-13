@@ -2,13 +2,14 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { getExploreUsers, toggleFollow, ExploreUser, ToggleFollowStatusType } from "@/lib/api";
+import { getExploreUsers, toggleFollow, ExploreUser } from "@/lib/api";
 import AppLayout from "@/components/AppLayout";
 
 const PAGE_SIZE = 20;
 
 export default function ExplorePage() {
   const [users, setUsers] = useState<ExploreUser[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
@@ -16,29 +17,31 @@ export default function ExplorePage() {
 
   const observerTarget = useRef<HTMLDivElement>(null);
 
-  // `skip` and a synchronous loading lock both live in refs, not state.
-  // Why: the IntersectionObserver can fire again before a state update from
-  // the previous loadMore() call has actually committed (React state updates
-  // aren't synchronous), so two overlapping calls could both read
-  // isLoading === false and skip === 0, fetch the same page twice, and
-  // duplicate every user in the list. Refs are read/written synchronously,
-  // so the lock actually prevents the second call from proceeding.
+  // Synchronous loading locks and cursor tracking in refs
   const skipRef = useRef(0);
   const isLoadingRef = useRef(false);
   const hasMoreRef = useRef(true);
+  const searchQueryRef = useRef("");
 
-  const loadMore = useCallback(async () => {
-    if (isLoadingRef.current || !hasMoreRef.current) return;
+  const loadMore = useCallback(async (reset = false) => {
+    if (isLoadingRef.current) return;
+    if (!reset && !hasMoreRef.current) return;
+
+    if (reset) {
+      skipRef.current = 0;
+      hasMoreRef.current = true;
+      setHasMore(true);
+    }
 
     isLoadingRef.current = true;
     setIsLoading(true);
 
     try {
-      const res = await getExploreUsers(skipRef.current, PAGE_SIZE);
+      const currentQuery = searchQueryRef.current;
+      const res = await getExploreUsers(skipRef.current, PAGE_SIZE, currentQuery);
 
       setUsers((prev) => {
-        // Extra safety net: de-duplicate by id in case of any remaining
-        // overlap (e.g. a user's own data changing between pages).
+        if (reset) return res.users;
         const existingIds = new Set(prev.map((u) => u.id));
         const newOnes = res.users.filter((u) => !existingIds.has(u.id));
         return [...prev, ...newOnes];
@@ -56,27 +59,47 @@ export default function ExplorePage() {
     }
   }, []);
 
-  // Initial load
+  // Search input change handler with debounce
   useEffect(() => {
-    loadMore();
-  }, [loadMore]);
+    searchQueryRef.current = searchQuery;
+    const timer = setTimeout(() => {
+      setInitialLoad(true);
+      loadMore(true);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, loadMore]);
 
-  // Infinite scroll — observe a sentinel div near the bottom of the list
+  // Infinite scroll — IntersectionObserver on sentinel
   useEffect(() => {
     const target = observerTarget.current;
     if (!target) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) {
-          loadMore();
+        if (entries[0].isIntersecting && hasMoreRef.current && !isLoadingRef.current) {
+          loadMore(false);
         }
       },
-      { threshold: 0.1 }
+      { threshold: 0.1, rootMargin: "200px" }
     );
 
     observer.observe(target);
     return () => observer.disconnect();
+  }, [loadMore]);
+
+  // Infinite scroll — Window scroll listener fallback
+  useEffect(() => {
+    const handleScroll = () => {
+      if (
+        window.innerHeight + window.scrollY >= document.body.offsetHeight - 400 &&
+        hasMoreRef.current &&
+        !isLoadingRef.current
+      ) {
+        loadMore(false);
+      }
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
   }, [loadMore]);
 
   const handleFollowClick = async (user: ExploreUser) => {
@@ -112,9 +135,28 @@ export default function ExplorePage() {
   return (
     <AppLayout activeNav="explore">
       <div className="bg-surface text-on-surface min-h-screen">
-        <header className="flex items-center w-full px-md h-16 sticky top-0 z-50 bg-surface border-b border-outline-variant">
-          <div className="font-headline-sm text-headline-sm font-bold text-on-surface">
-            Explore
+        <header className="sticky top-0 z-50 bg-surface/95 backdrop-blur border-b border-outline-variant px-md py-3">
+          <div className="max-w-2xl mx-auto flex items-center gap-3">
+            <div className="relative flex-1">
+              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px]">
+                search
+              </span>
+              <input
+                type="text"
+                placeholder="Search developers..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-surface-container-lowest border border-outline-variant rounded-full pl-10 pr-4 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface"
+                >
+                  <span className="material-symbols-outlined text-[18px]">close</span>
+                </button>
+              )}
+            </div>
           </div>
         </header>
 
@@ -126,31 +168,31 @@ export default function ExplorePage() {
           ) : users.length === 0 ? (
             <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-xl text-center">
               <span className="material-symbols-outlined text-4xl text-on-surface-variant mb-2">group</span>
-              <h3 className="text-title-md font-bold text-on-surface mb-1">No users found</h3>
-              <p className="text-body-md text-on-surface-variant">Check back later.</p>
+              <h3 className="text-title-md font-bold text-on-surface mb-1">No developers found</h3>
+              <p className="text-body-md text-on-surface-variant">Try searching for another username or keyword.</p>
             </div>
           ) : (
             <div className="space-y-3">
               {users.map((user) => (
                 <div
                   key={user.id}
-                  className="bg-surface-container-low border border-outline-variant rounded-xl p-md flex items-center justify-between gap-4"
+                  className="bg-surface-container-low border border-outline-variant rounded-xl p-md flex items-center justify-between gap-4 hover:border-outline transition-colors"
                 >
                   <Link href={`/profile/${user.username}`} className="flex items-center gap-3 min-w-0 flex-1">
                     <div className="w-12 h-12 rounded-full overflow-hidden bg-surface-container-highest shrink-0 border border-outline-variant/30">
                       {user.avatar_url ? (
                         <img src={user.avatar_url} alt={user.username} className="w-full h-full object-cover" />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center font-bold">
+                        <div className="w-full h-full flex items-center justify-center font-bold text-on-surface">
                           {(user.full_name || user.username).substring(0, 2).toUpperCase()}
                         </div>
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-sm truncate">{user.full_name || user.username}</span>
+                        <span className="font-bold text-sm text-on-surface truncate">{user.full_name || user.username}</span>
                         {user.is_private && (
-                          <span className="material-symbols-outlined text-[14px] text-on-surface-variant shrink-0">lock</span>
+                          <span className="material-symbols-outlined text-[14px] text-on-surface-variant shrink-0" title="Private account">lock</span>
                         )}
                       </div>
                       <div className="text-[13px] text-primary">@{user.username}</div>
@@ -173,21 +215,21 @@ export default function ExplorePage() {
                   </button>
                 </div>
               ))}
+            </div>
+          )}
 
-              {/* Infinite scroll sentinel */}
-              <div ref={observerTarget} className="h-4" />
+          {/* Infinite Scroll Sentinel — always rendered at bottom */}
+          <div ref={observerTarget} className="h-10 my-4" />
 
-              {isLoading && (
-                <div className="flex items-center justify-center py-6">
-                  <span className="material-symbols-outlined animate-spin-slow text-primary text-2xl">progress_activity</span>
-                </div>
-              )}
+          {isLoading && !initialLoad && (
+            <div className="flex items-center justify-center py-6">
+              <span className="material-symbols-outlined animate-spin-slow text-primary text-2xl">progress_activity</span>
+            </div>
+          )}
 
-              {!hasMore && users.length > 0 && (
-                <div className="text-center py-6 text-on-surface-variant text-sm">
-                  You've reached the end.
-                </div>
-              )}
+          {!hasMore && users.length > 0 && (
+            <div className="text-center py-6 text-on-surface-variant text-sm font-medium">
+              You've reached the end.
             </div>
           )}
         </main>
