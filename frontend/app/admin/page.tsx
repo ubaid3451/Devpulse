@@ -10,7 +10,7 @@ import { getAdminStats, AdminStatsResponse } from "@/lib/api";
 
 function StatCard({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="bg-[#111318] border border-outline-variant/30 rounded-xl p-5">
+    <div className="bg-surface-container border border-outline-variant/30 rounded-xl p-5">
       <div className="text-[13px] text-on-surface-variant mb-1">{label}</div>
       <div className="text-2xl font-bold">{value}</div>
     </div>
@@ -27,7 +27,7 @@ function TrendChart({ title, data }: { title: string; data: { date: string; coun
 
   if (!data || data.length === 0) {
     return (
-      <div className="bg-[#111318] border border-outline-variant/30 rounded-xl p-5">
+      <div className="bg-surface-container border border-outline-variant/30 rounded-xl p-5">
         <div className="text-[13px] text-on-surface-variant mb-3">{title} — last 30 days</div>
         <div className="h-40 flex items-center justify-center text-on-surface-variant text-sm">No data</div>
       </div>
@@ -59,7 +59,7 @@ function TrendChart({ title, data }: { title: string; data: { date: string; coun
   const xLabelIndices = new Set([0, Math.floor((data.length - 1) / 2), data.length - 1]);
 
   return (
-    <div className="bg-[#111318] border border-outline-variant/30 rounded-xl p-5">
+    <div className="bg-surface-container border border-outline-variant/30 rounded-xl p-5">
       <div className="text-[13px] text-on-surface-variant mb-3">{title} — last 30 days</div>
       <div className="w-full" style={{ height: H }}>
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-full">

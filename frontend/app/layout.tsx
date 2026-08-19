@@ -6,6 +6,8 @@ import { AuthProvider } from "@/lib/auth-context";
 import { ChatSocketProvider } from "@/lib/chat-socket-context";
 import { E2EEProvider } from "@/lib/e2ee-context";
 
+import { ThemeProvider } from "@/lib/theme-context";
+
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
@@ -34,8 +36,25 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`dark ${inter.variable} ${jetbrainsMono.variable}`}>
+    <html lang="en" className={`dark ${inter.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
       <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                const saved = localStorage.getItem('devpulse_theme') || 'dark';
+                document.documentElement.setAttribute('data-theme', saved);
+                if (saved === 'light') {
+                  document.documentElement.classList.remove('dark');
+                  document.documentElement.classList.add('light');
+                } else {
+                  document.documentElement.classList.remove('light');
+                  document.documentElement.classList.add('dark');
+                }
+              } catch (e) {}
+            `,
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
@@ -44,11 +63,13 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-background text-on-background font-body-base antialiased min-h-screen flex flex-col">
-        <AuthProvider>
-          <E2EEProvider>
-            <ChatSocketProvider>{children}</ChatSocketProvider>
-          </E2EEProvider>
-        </AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <E2EEProvider>
+              <ChatSocketProvider>{children}</ChatSocketProvider>
+            </E2EEProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

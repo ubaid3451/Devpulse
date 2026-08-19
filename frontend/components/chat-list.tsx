@@ -109,9 +109,9 @@ export function ChatList({
   );
 
   return (
-    <div className="flex h-full w-[310px] flex-col border-r border-white/10 bg-[#0a0a0c]">
+    <div className="flex h-full w-[310px] flex-col border-r border-outline-variant/30 bg-surface-container-low">
       <div className="flex items-center justify-between px-4 pt-5 pb-3">
-        <h2 className="text-lg font-semibold text-white">Chats</h2>
+        <h2 className="text-lg font-semibold text-on-surface">Chats</h2>
         <button
           type="button"
           onClick={onStartNewChat}
@@ -195,7 +195,7 @@ export function ChatList({
                   {isMenuOpen && (
                     <div
                       ref={menuRef}
-                      className="absolute right-0 top-9 z-10 w-40 overflow-hidden rounded-lg border border-white/10 bg-[#151518] shadow-xl"
+                      className="absolute right-0 top-9 z-10 w-40 overflow-hidden rounded-lg border border-outline-variant/40 bg-surface-container shadow-xl"
                     >
                       <button
                         type="button"
@@ -214,7 +214,7 @@ export function ChatList({
 
                 {isPendingDelete && (
                   <div
-                    className="absolute inset-0 z-20 flex items-center justify-between gap-2 bg-[#151518] px-4"
+                    className="absolute inset-0 z-20 flex items-center justify-between gap-2 bg-surface-container px-4"
                     role="dialog"
                     aria-label={`Confirm delete chat with ${name}`}
                   >

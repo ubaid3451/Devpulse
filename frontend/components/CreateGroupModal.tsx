@@ -73,7 +73,7 @@ export default function CreateGroupModal({ onClose, onCreated }: CreateGroupModa
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-[440px] max-w-[90vw] bg-[#111318] border border-outline-variant/40 rounded-xl shadow-2xl flex flex-col max-h-[85vh]">
+      <div className="w-[440px] max-w-[90vw] bg-surface-container border border-outline-variant/40 rounded-xl shadow-2xl flex flex-col max-h-[85vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/30">
           <h2 className="font-bold text-lg">New Group</h2>
@@ -94,7 +94,7 @@ export default function CreateGroupModal({ onClose, onCreated }: CreateGroupModa
               value={groupName}
               onChange={(e) => setGroupName(e.target.value)}
               placeholder="e.g. Backend Team"
-              className="w-full bg-[#1e2025] border border-outline-variant/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-primary transition-colors"
+              className="w-full bg-surface-variant border border-outline-variant/50 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-primary transition-colors"
             />
           </div>
 
@@ -108,7 +108,7 @@ export default function CreateGroupModal({ onClose, onCreated }: CreateGroupModa
                 {selectedUsers.map((u) => (
                   <div
                     key={u.id}
-                    className="flex items-center gap-1.5 bg-[#1e2025] border border-outline-variant/40 rounded-full pl-1 pr-2 py-1"
+                    className="flex items-center gap-1.5 bg-surface-variant border border-outline-variant/40 rounded-full pl-1 pr-2 py-1"
                   >
                     <div className="w-5 h-5 rounded-full overflow-hidden bg-surface-variant shrink-0">
                       {u.avatar_url ? (
@@ -144,7 +144,7 @@ export default function CreateGroupModal({ onClose, onCreated }: CreateGroupModa
                 placeholder="Search developers..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-[#1e2025] border border-outline-variant/50 rounded-lg pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-primary transition-colors"
+                className="w-full bg-surface-variant border border-outline-variant/50 rounded-lg pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-primary transition-colors"
               />
             </div>
 
@@ -157,7 +157,7 @@ export default function CreateGroupModal({ onClose, onCreated }: CreateGroupModa
                     <div
                       key={user.id}
                       onClick={() => addUser(user)}
-                      className="p-2.5 cursor-pointer transition-colors flex items-center gap-3 hover:bg-[#1e2025]"
+                      className="p-2.5 cursor-pointer transition-colors flex items-center gap-3 hover:bg-surface-variant"
                     >
                       <div className="w-8 h-8 rounded-full overflow-hidden bg-surface-variant shrink-0">
                         {user.avatar_url ? (
@@ -199,7 +199,7 @@ export default function CreateGroupModal({ onClose, onCreated }: CreateGroupModa
           <button
             onClick={handleCreate}
             disabled={isCreating}
-            className="px-4 py-2 text-sm rounded-lg bg-[#71d4ff] text-[#003548] font-medium disabled:opacity-50 hover:brightness-110 transition-colors"
+            className="px-4 py-2 text-sm rounded-lg bg-primary text-on-primary font-medium disabled:opacity-50 hover:brightness-110 transition-colors"
           >
             {isCreating ? "Creating..." : "Create Group"}
           </button>

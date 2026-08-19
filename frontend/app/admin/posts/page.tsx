@@ -126,7 +126,7 @@ export default function AdminPostsPage() {
                 placeholder="Search title, content, or author..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="bg-[#1e2025] border border-outline-variant/50 rounded-lg px-3 py-2 text-sm w-full sm:w-72 focus:outline-none focus:border-primary transition-colors"
+                className="bg-surface-container border border-outline-variant/50 rounded-lg px-3 py-2 text-sm w-full sm:w-72 focus:outline-none focus:border-primary transition-colors"
               />
             </div>
           </div>
@@ -137,7 +137,7 @@ export default function AdminPostsPage() {
 
           <div className="border border-outline-variant/30 rounded-xl overflow-x-auto">
             <table className="w-full text-sm min-w-[640px]">
-              <thead className="bg-[#111318] text-on-surface-variant text-left">
+              <thead className="bg-surface-container text-on-surface-variant text-left">
                 <tr>
                   <th className="px-4 py-3 font-medium">Post</th>
                   <th className="px-4 py-3 font-medium">Author</th>
@@ -260,20 +260,20 @@ export default function AdminPostsPage() {
       {/* Edit Modal */}
       {editingPost && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="bg-[#111318] border border-outline-variant/40 rounded-xl w-full max-w-lg p-5">
+          <div className="bg-surface-container border border-outline-variant/40 rounded-xl w-full max-w-lg p-5">
             <h2 className="font-bold mb-4">Edit post</h2>
             <label className="block text-[12px] text-on-surface-variant mb-1">Title</label>
             <input
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
-              className="w-full bg-[#1e2025] border border-outline-variant/50 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-primary"
+              className="w-full bg-surface-variant border border-outline-variant/50 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-primary"
             />
             <label className="block text-[12px] text-on-surface-variant mb-1">Content</label>
             <textarea
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
               rows={5}
-              className="w-full bg-[#1e2025] border border-outline-variant/50 rounded-lg px-3 py-2 text-sm mb-4 resize-none focus:outline-none focus:border-primary"
+              className="w-full bg-surface-variant border border-outline-variant/50 rounded-lg px-3 py-2 text-sm mb-4 resize-none focus:outline-none focus:border-primary"
             />
             <div className="flex justify-end gap-2">
               <button

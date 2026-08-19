@@ -4,6 +4,8 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
+import { useTheme } from "@/lib/theme-context";
+import ThemeModal from "@/components/ThemeModal";
 import { updateProfile, uploadAvatar, updatePrivacy } from "@/lib/api";
 
 const PREDEFINED_AVATARS = [
@@ -17,6 +19,7 @@ const PREDEFINED_AVATARS = [
 export default function MyProfilePage() {
   const router = useRouter();
   const { user, isLoading } = useAuth();
+  const { theme, availableThemes } = useTheme();
 
   const [bio, setBio] = useState("");
   const [fullName, setFullName] = useState("");
@@ -25,6 +28,7 @@ export default function MyProfilePage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isTogglingPrivacy, setIsTogglingPrivacy] = useState(false);
+  const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -197,6 +201,51 @@ export default function MyProfilePage() {
           </div>
         </div>
 
+        {/* Appearance & Theme Setting */}
+        <div className="bg-surface-container-low border border-outline-variant rounded-xl p-md lg:p-lg space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-label-lg font-bold text-on-surface mb-1 flex items-center gap-2">
+                <span className="material-symbols-outlined text-[20px] text-on-surface-variant">palette</span>
+                Appearance & Theme
+              </h3>
+              <p className="text-body-sm text-on-surface-variant">Choose your preferred visual theme for DevPulse.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsThemeModalOpen(true)}
+              className="px-4 py-2 text-sm font-semibold rounded-lg bg-primary text-on-primary hover:brightness-110 active:scale-95 transition-all flex items-center gap-1.5 shadow-sm"
+            >
+              <span className="material-symbols-outlined text-[18px]">brush</span>
+              Change Theme
+            </button>
+          </div>
+
+          <div
+            onClick={() => setIsThemeModalOpen(true)}
+            className="cursor-pointer p-3.5 rounded-xl border border-outline-variant/60 bg-surface-container hover:border-primary/50 transition-all flex items-center justify-between"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-primary/15 text-primary flex items-center justify-center">
+                <span className="material-symbols-outlined text-[20px]">
+                  {availableThemes.find((t) => t.id === theme)?.icon || "palette"}
+                </span>
+              </div>
+              <div>
+                <div className="font-semibold text-sm text-on-surface">
+                  {availableThemes.find((t) => t.id === theme)?.name || "Dark"}
+                </div>
+                <div className="text-[12px] text-on-surface-variant">
+                  {availableThemes.find((t) => t.id === theme)?.description}
+                </div>
+              </div>
+            </div>
+            <span className="text-[11px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-primary/20 text-primary">
+              Active
+            </span>
+          </div>
+        </div>
+
         {/* Blocked Users — link out to the dedicated management page */}
         <Link
           href="/blocked"
@@ -297,6 +346,11 @@ export default function MyProfilePage() {
           </div>
         </form>
       </main>
+
+      <ThemeModal
+        isOpen={isThemeModalOpen}
+        onClose={() => setIsThemeModalOpen(false)}
+      />
     </div>
   );
 }

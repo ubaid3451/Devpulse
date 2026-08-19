@@ -56,7 +56,7 @@ function PermissionsModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-[#111318] border border-outline-variant/40 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+      <div className="bg-surface-container border border-outline-variant/40 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
         <div className="px-6 py-4 border-b border-outline-variant/20 flex items-center justify-between">
           <div>
             <h2 className="text-base font-semibold">Admin Permissions</h2>
@@ -71,7 +71,7 @@ function PermissionsModal({
           {ALL_PERMISSIONS.map(({ key, label }) => (
             <label
               key={key}
-              className="flex items-center gap-3 p-3 rounded-xl bg-[#1a1d24] hover:bg-[#1e2229] cursor-pointer transition-colors"
+              className="flex items-center gap-3 p-3 rounded-xl bg-surface-variant/70 hover:bg-surface-variant cursor-pointer transition-colors"
             >
               <input
                 type="checkbox"
@@ -244,7 +244,7 @@ export default function AdminUsersPage() {
               placeholder="Search by email, username, or name..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="bg-[#1e2025] border border-outline-variant/50 rounded-lg px-3 py-2 text-sm w-full sm:w-72 focus:outline-none focus:border-primary transition-colors"
+              className="bg-surface-container border border-outline-variant/50 rounded-lg px-3 py-2 text-sm w-full sm:w-72 focus:outline-none focus:border-primary transition-colors"
             />
           </div>
 
@@ -254,7 +254,7 @@ export default function AdminUsersPage() {
 
           <div className="border border-outline-variant/30 rounded-xl overflow-x-auto">
             <table className="w-full text-sm min-w-[640px]">
-              <thead className="bg-[#111318] text-on-surface-variant text-left">
+              <thead className="bg-surface-container text-on-surface-variant text-left">
                 <tr>
                   <th className="px-4 py-3 font-medium">User</th>
                   <th className="px-4 py-3 font-medium">Email</th>

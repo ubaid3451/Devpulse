@@ -514,7 +514,7 @@ function ChatPageContent() {
         {/* Conversations Sidebar — full screen on mobile when no convo is active, hidden otherwise */}
         <div className={`${
           activeConversationId ? 'hidden md:flex' : 'flex'
-        } md:flex flex-col md:w-72 lg:w-80 w-full shrink-0 border-r border-outline-variant bg-[#111318]`}>
+        } md:flex flex-col md:w-72 lg:w-80 w-full shrink-0 border-r border-outline-variant bg-surface-container-low`}>
           <div className="p-4 flex items-center justify-between border-b border-outline-variant/30">
             <h2 className="font-headline-sm text-headline-sm font-bold">Chats</h2>
             <button
@@ -534,7 +534,7 @@ function ChatPageContent() {
                 placeholder="Search developers..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-[#1e2025] border border-outline-variant/50 rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:border-primary transition-colors"
+                className="w-full bg-surface-variant border border-outline-variant/50 rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:border-primary transition-colors"
               />
             </div>
           </div>
@@ -734,14 +734,14 @@ function ChatPageContent() {
         {/* Chat Area — shown on mobile only when a conversation is active */}
         <div className={`${
           activeConversationId ? 'flex' : 'hidden md:flex'
-        } flex-1 flex-col bg-[#0b0d10] relative min-w-0`}>
+        } flex-1 flex-col bg-surface relative min-w-0`}>
           {isResolvingConversation ? (
             <div className="flex-1 flex items-center justify-center text-on-surface-variant/50">
               <p className="text-title-lg font-medium">Loading conversation...</p>
             </div>
           ) : activeConversationId ? (
             <>
-              <div className="h-16 px-3 sm:px-6 border-b border-outline-variant/30 flex justify-between items-center bg-[#0b0d10]/95 backdrop-blur-md sticky top-0 z-10">
+              <div className="h-16 px-3 sm:px-6 border-b border-outline-variant/30 flex justify-between items-center bg-surface/95 backdrop-blur-md sticky top-0 z-10">
                 <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                   {/* Back button — mobile only */}
                   <button
@@ -843,8 +843,8 @@ function ChatPageContent() {
                           <div
                             className={`px-4 py-2.5 rounded-2xl relative ${
                               isMine
-                                ? "bg-[#71d4ff] text-[#003548] rounded-br-sm"
-                                : "bg-[#1e2025] text-on-surface border border-outline-variant/20 rounded-bl-sm"
+                                ? "bg-primary text-on-primary rounded-br-sm"
+                                : "bg-surface-variant text-on-surface border border-outline-variant/20 rounded-bl-sm"
                             }`}
                           >
                             {msg.image_url && (
@@ -913,14 +913,14 @@ function ChatPageContent() {
                 <div ref={messagesEndRef} />
               </div>
 
-              <div className="p-4 bg-[#0b0d10] border-t border-outline-variant/20">
+              <div className="p-4 bg-surface border-t border-outline-variant/20">
                 {activeConversation?.is_blocked ? (
-                  <div className="bg-[#1e2025]/90 border border-red-500/30 rounded-xl p-4 text-center text-red-400 flex items-center justify-center gap-2">
+                  <div className="bg-surface-variant/90 border border-red-500/30 rounded-xl p-4 text-center text-red-400 flex items-center justify-center gap-2">
                     <span className="material-symbols-outlined text-[20px]">block</span>
                     <span className="text-sm font-medium">You can&apos;t message a blocked user</span>
                   </div>
                 ) : (
-                  <div className="bg-[#111318] border border-outline-variant/40 rounded-xl overflow-hidden focus-within:border-primary/50 transition-colors">
+                  <div className="bg-surface-container border border-outline-variant/40 rounded-xl overflow-hidden focus-within:border-primary/50 transition-colors">
                     <div className="px-3 py-2 border-b border-outline-variant/20 flex gap-2 text-on-surface-variant relative">
                       <button onClick={() => insertTextAtCursor("**", "**")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm">B</button>
                       <button onClick={() => insertTextAtCursor("*", "*")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm italic">I</button>
@@ -990,7 +990,7 @@ function ChatPageContent() {
                       <button
                         onClick={sendChatMessage}
                         disabled={(!inputText.trim() && !attachedImage) || isUploading}
-                        className="p-3 bg-[#71d4ff] text-[#003548] rounded-lg disabled:opacity-50 hover:brightness-110 transition-colors shrink-0 mb-1"
+                        className="p-3 bg-primary text-on-primary rounded-lg disabled:opacity-50 hover:brightness-110 transition-colors shrink-0 mb-1"
                       >
                         <span className="material-symbols-outlined text-[20px]">{isUploading ? "hourglass_empty" : "send"}</span>
                       </button>
