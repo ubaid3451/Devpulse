@@ -1,10 +1,10 @@
+"use client";
+
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { useTheme } from "@/lib/theme-context";
 import Link from "next/link";
 import CreatePostModal from "@/components/CreatePostModal";
-import ThemeModal from "@/components/ThemeModal";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -14,9 +14,7 @@ interface AppLayoutProps {
 export default function AppLayout({ children, activeNav = "home" }: AppLayoutProps) {
   const router = useRouter();
   const { user, logout } = useAuth();
-  const { theme } = useTheme();
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
 
   async function handleLogout() {
     await logout();
@@ -122,17 +120,6 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
             </Link>
 
             <button
-              onClick={() => setIsThemeModalOpen(true)}
-              className="w-full flex items-center gap-md px-md py-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors rounded-lg mb-1"
-            >
-              <span className="material-symbols-outlined">palette</span>
-              <span className="font-body-base text-body-base text-left flex-1">Theme</span>
-              <span className="text-[11px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded bg-surface-container border border-outline-variant/40 text-primary">
-                {theme}
-              </span>
-            </button>
-
-            <button
               onClick={handleLogout}
               className="w-full flex items-center gap-md px-md py-sm text-error hover:bg-error-container/20 transition-colors rounded-lg"
             >
@@ -182,11 +169,6 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
           }}
         />
       )}
-
-      <ThemeModal
-        isOpen={isThemeModalOpen}
-        onClose={() => setIsThemeModalOpen(false)}
-      />
     </div>
   );
 }
