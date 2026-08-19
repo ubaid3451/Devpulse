@@ -579,7 +579,6 @@ function ChatPageContent() {
 
       setInputText("");
       setAttachedImage(null);
-      setShowEmojiPicker(false);
     } catch (err) {
       console.error("[Signal:ERROR] send_message_failed", { error: String(err) });
     } finally {
