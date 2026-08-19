@@ -5,33 +5,8 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import AppLayout from "@/components/AppLayout";
 import Link from "next/link";
+import AdminTabs from "@/components/AdminTabs";
 import { getAdminPosts, updateAdminPost, deleteAdminPost, AdminPostOut } from "@/lib/api";
-
-function AdminTabs({ active }: { active: "dashboard" | "users" | "posts" }) {
-  const tabs = [
-    { id: "dashboard", label: "Dashboard", href: "/admin" },
-    { id: "users", label: "Users", href: "/admin/users" },
-    { id: "posts", label: "Posts", href: "/admin/posts" },
-  ] as const;
-
-  return (
-    <div className="flex gap-2 border-b border-outline-variant/30 px-4 sm:px-6 pt-4 overflow-x-auto">
-      {tabs.map((tab) => (
-        <Link
-          key={tab.id}
-          href={tab.href}
-          className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
-            active === tab.id
-              ? "text-primary border-b-2 border-primary"
-              : "text-on-surface-variant hover:text-on-surface"
-          }`}
-        >
-          {tab.label}
-        </Link>
-      ))}
-    </div>
-  );
-}
 
 const PAGE_SIZE = 20;
 

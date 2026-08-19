@@ -9,26 +9,30 @@ interface AdminTabsProps {
 
 export default function AdminTabs({ active }: AdminTabsProps) {
   const tabs = [
-    { id: "dashboard", label: "Dashboard", href: "/admin" },
-    { id: "users", label: "Users", href: "/admin/users" },
-    { id: "posts", label: "Posts", href: "/admin/posts" },
-  ];
+    { id: "dashboard", label: "Dashboard", icon: "dashboard", href: "/admin" },
+    { id: "users", label: "Users", icon: "group", href: "/admin/users" },
+    { id: "posts", label: "Posts", icon: "article", href: "/admin/posts" },
+  ] as const;
 
   return (
-    <div className="flex border-b border-outline-variant px-6 pt-4 gap-8">
-      {tabs.map((tab) => (
-        <Link
-          key={tab.id}
-          href={tab.href}
-          className={`pb-3 font-semibold text-sm transition-colors border-b-2 ${
-            active === tab.id
-              ? "border-primary text-primary"
-              : "border-transparent text-on-surface-variant hover:text-on-surface"
-          }`}
-        >
-          {tab.label}
-        </Link>
-      ))}
+    <div className="sticky top-0 z-30 bg-surface/95 backdrop-blur-md border-b border-outline-variant/30 px-4 sm:px-6 pt-3 pb-0 flex gap-2 sm:gap-4 overflow-x-auto shrink-0 shadow-sm">
+      {tabs.map((tab) => {
+        const isActive = active === tab.id;
+        return (
+          <Link
+            key={tab.id}
+            href={tab.href}
+            className={`flex items-center gap-2 px-3 sm:px-4 py-2.5 text-sm font-medium transition-all whitespace-nowrap border-b-2 ${
+              isActive
+                ? "text-primary border-primary font-semibold"
+                : "text-on-surface-variant hover:text-on-surface border-transparent"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[18px]">{tab.icon}</span>
+            <span>{tab.label}</span>
+          </Link>
+        );
+      })}
     </div>
   );
 }
