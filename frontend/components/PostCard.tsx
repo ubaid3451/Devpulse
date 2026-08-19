@@ -58,6 +58,7 @@ export default function PostCard({ post, onPostUpdate, onLikeToggle, onEdit }: P
   const handleLike = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    (e.currentTarget as HTMLElement)?.blur();
 
     const newIsLiked = !isLiked;
     const newLikesCount = newIsLiked ? likesCount + 1 : Math.max(0, likesCount - 1);
@@ -84,6 +85,7 @@ export default function PostCard({ post, onPostUpdate, onLikeToggle, onEdit }: P
   const handleRepost = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    (e.currentTarget as HTMLElement)?.blur();
 
     const newIsReposted = !isReposted;
     setIsReposted(newIsReposted); // optimistic
@@ -309,7 +311,7 @@ export default function PostCard({ post, onPostUpdate, onLikeToggle, onEdit }: P
             <button
               type="button"
               onClick={handleRepost}
-              className={`flex items-center gap-xs transition-colors p-1.5 rounded-md hover:bg-white/5 ${isReposted ? 'text-[#00b894]' : 'text-on-surface-variant hover:text-[#00b894]'}`}
+              className={`flex items-center gap-xs transition-colors p-1.5 rounded-md [@media(hover:hover)]:hover:bg-white/5 ${isReposted ? 'text-[#00b894]' : 'text-on-surface-variant [@media(hover:hover)]:hover:text-[#00b894]'}`}
             >
               <span className="material-symbols-outlined text-[18px]">repeat</span>
               <span className="font-label-caps text-label-caps">Repost</span>
@@ -317,7 +319,7 @@ export default function PostCard({ post, onPostUpdate, onLikeToggle, onEdit }: P
             <button
               type="button"
               onClick={handleLike}
-              className={`flex items-center gap-xs transition-colors p-1.5 rounded-md hover:bg-white/5 ${isLiked ? 'text-[#ff4757]' : 'text-on-surface-variant hover:text-[#ff4757]'}`}
+              className={`flex items-center gap-xs transition-colors p-1.5 rounded-md [@media(hover:hover)]:hover:bg-white/5 ${isLiked ? 'text-[#ff4757]' : 'text-on-surface-variant [@media(hover:hover)]:hover:text-[#ff4757]'}`}
             >
               <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: isLiked ? "'FILL' 1" : "'FILL' 0" }}>favorite</span>
               <span className="font-label-caps text-label-caps">{likesCount} <span className="hidden sm:inline">Like</span></span>
