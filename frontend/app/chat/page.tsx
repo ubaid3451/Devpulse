@@ -9,7 +9,6 @@ import { cacheMessagePlaintext, getCachedMessagePlaintext } from "@/lib/message-
 import { requestNotificationPermission, showDesktopNotification, isTabHidden } from "@/lib/notifications";
 import AppLayout from "@/components/AppLayout";
 import CreateGroupModal from "@/components/CreateGroupModal";
-import EmojiPicker, { Theme } from "emoji-picker-react";
 import {
   getConversations,
   ConversationResponse,
@@ -137,7 +136,6 @@ function ChatPageContent() {
   const [isResolvingConversation, setIsResolvingConversation] = useState(false);
 
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
   const [attachedImage, setAttachedImage] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -149,29 +147,26 @@ function ChatPageContent() {
     requestNotificationPermission();
   }, []);
 
-  // Close reaction picker or emoji picker on click outside or Escape key
+  // Close reaction picker on click outside or Escape key
   useEffect(() => {
     const handleDocumentClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
 
-      // If click is inside an EmojiPicker or a reaction button / emoji trigger button, do nothing
+      // If click is inside an EmojiPicker or a reaction button, do nothing
       if (
         target.closest(".epr-main") ||
-        target.closest("[data-emoji-trigger]") ||
         target.closest("[data-reaction-btn]")
       ) {
         return;
       }
 
       setActiveReactionMsgId(null);
-      setShowEmojiPicker(false);
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setActiveReactionMsgId(null);
-        setShowEmojiPicker(false);
       }
     };
 
@@ -597,32 +592,6 @@ function ChatPageContent() {
     setActiveReactionMsgId(null);
   };
 
-  const insertTextAtCursor = (prefix: string, suffix: string = "") => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = inputText;
-
-    const hasSelection = start !== end;
-    const selectedText = hasSelection ? text.substring(start, end) : "";
-    const placeholder = prefix === "[" ? "link text" : selectedText;
-    const insertContent = prefix + placeholder + suffix;
-    const newText = text.substring(0, start) + insertContent + text.substring(end);
-
-    setInputText(newText);
-
-    setTimeout(() => {
-      textarea.focus();
-      if (hasSelection) {
-        textarea.setSelectionRange(start + prefix.length, start + prefix.length + placeholder.length);
-      } else {
-        textarea.setSelectionRange(start + prefix.length, start + prefix.length + placeholder.length);
-      }
-    }, 0);
-  };
-
   const activeConversation = conversations.find((c) => c.conversation_id === activeConversationId);
   const activeOtherParticipant = activeConversation?.participants[0];
   const headerTitle = activeConversation?.is_group
@@ -961,7 +930,7 @@ function ChatPageContent() {
                         </div>
                       )}
 
-                      <div className={`flex flex-col ${isMine ? "items-end" : "items-start"} max-w-[85%] sm:max-w-[70%] group`}>
+                      <div className={`flex flex-col ${isMine ? "items-end" : "items-start"} max-w-[85%] sm:max-w-[70%] group relative`}>
                         {activeConversation?.is_group && !isMine && showAvatar && (
                           <div className="text-[12px] font-medium text-on-surface-variant mb-1 px-1">
                             {sender.name}
@@ -1009,12 +978,21 @@ function ChatPageContent() {
                         </div>
 
                         {activeReactionMsgId === msg.id && (
-                          <div className={`absolute z-20 ${isMine ? "right-12" : "left-12"} mt-1`}>
-                            <EmojiPicker
-                              onEmojiClick={(e) => toggleReaction(msg.id, e.emoji)}
-                              theme={Theme.DARK}
-                              lazyLoadEmojis={true}
-                            />
+                          <div
+                            className={`absolute z-30 ${
+                              isMine ? "right-0" : "left-0"
+                            } -top-10 flex items-center gap-1 p-1 bg-surface-container border border-outline-variant rounded-full shadow-2xl animate-fade-in`}
+                          >
+                            {["👍", "❤️", "🔥", "🚀", "😂", "🎉", "👀"].map((emoji) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => toggleReaction(msg.id, emoji)}
+                                className="w-8 h-8 flex items-center justify-center text-lg hover:scale-125 transition-transform rounded-full hover:bg-surface-variant"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
                           </div>
                         )}
 
@@ -1063,74 +1041,6 @@ function ChatPageContent() {
                   </div>
                 ) : (
                   <div className="bg-surface-container border border-outline-variant/40 rounded-xl overflow-hidden focus-within:border-primary/50 transition-colors">
-                    <div className="px-3 py-1.5 border-b border-outline-variant/20 flex items-center gap-1 text-on-surface-variant relative bg-surface-container-low/50">
-                      <button
-                        type="button"
-                        onClick={() => insertTextAtCursor("**", "**")}
-                        title="Bold (**text**)"
-                        className="w-7 h-7 flex items-center justify-center rounded-md hover:text-on-surface hover:bg-surface-variant transition-colors font-bold text-sm"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">format_bold</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => insertTextAtCursor("*", "*")}
-                        title="Italic (*text*)"
-                        className="w-7 h-7 flex items-center justify-center rounded-md hover:text-on-surface hover:bg-surface-variant transition-colors font-bold text-sm italic"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">format_italic</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => insertTextAtCursor("`", "`")}
-                        title="Inline Code (`code`)"
-                        className="w-7 h-7 flex items-center justify-center rounded-md hover:text-on-surface hover:bg-surface-variant transition-colors text-sm"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">code</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => insertTextAtCursor("```\n", "\n```")}
-                        title="Code Block (```code```)"
-                        className="w-7 h-7 flex items-center justify-center rounded-md hover:text-on-surface hover:bg-surface-variant transition-colors text-sm"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">data_object</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => insertTextAtCursor("[", "](url)")}
-                        title="Link [label](url)"
-                        className="w-7 h-7 flex items-center justify-center rounded-md hover:text-on-surface hover:bg-surface-variant transition-colors"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">link</span>
-                      </button>
-                      <div className="w-[1px] h-4 bg-outline-variant/30 mx-1" />
-                      <button
-                        type="button"
-                        data-emoji-trigger="true"
-                        onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                        title="Emoji Picker"
-                        className={`w-7 h-7 flex items-center justify-center rounded-md transition-colors ${
-                          showEmojiPicker
-                            ? "text-primary bg-primary/15"
-                            : "hover:text-on-surface hover:bg-surface-variant"
-                        }`}
-                      >
-                        <span className="material-symbols-outlined text-[18px]">sentiment_satisfied</span>
-                      </button>
-
-                      {showEmojiPicker && (
-                        <div className="absolute bottom-full left-0 mb-2 z-30 shadow-2xl">
-                          <EmojiPicker
-                            onEmojiClick={(e) => {
-                              setInputText((prev) => prev + e.emoji);
-                              setShowEmojiPicker(false);
-                            }}
-                            theme={Theme.DARK}
-                          />
-                        </div>
-                      )}
-                    </div>
 
                     {attachedImage && (
                       <div className="px-4 py-2 bg-surface-variant/20 border-b border-outline-variant/20 flex items-center justify-between">
