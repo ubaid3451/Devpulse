@@ -153,10 +153,10 @@ function ChatPageContent() {
       const target = e.target as HTMLElement | null;
       if (!target) return;
 
-      // If click is inside an EmojiPicker or a reaction button, do nothing
+      // If click is inside a reaction button or reaction popup bar, do nothing
       if (
-        target.closest(".epr-main") ||
-        target.closest("[data-reaction-btn]")
+        target.closest("[data-reaction-btn]") ||
+        target.closest("[data-reaction-popup]")
       ) {
         return;
       }
@@ -588,6 +588,25 @@ function ChatPageContent() {
   };
 
   const toggleReaction = (messageId: string, emoji: string) => {
+    if (!currentUser) return;
+    
+    // Optimistic UI update: immediately update reaction count & state
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== messageId) return m;
+        const existingReactions = m.reactions || [];
+        const hasReacted = existingReactions.some(
+          (r) => r.emoji === emoji && r.user_id === currentUser.id
+        );
+        const updatedReactions = hasReacted
+          ? existingReactions.filter(
+              (r) => !(r.emoji === emoji && r.user_id === currentUser.id)
+            )
+          : [...existingReactions, { emoji, user_id: currentUser.id }];
+        return { ...m, reactions: updatedReactions };
+      })
+    );
+
     sendReaction(messageId, emoji);
     setActiveReactionMsgId(null);
   };
@@ -979,6 +998,7 @@ function ChatPageContent() {
 
                         {activeReactionMsgId === msg.id && (
                           <div
+                            data-reaction-popup="true"
                             className={`absolute z-30 ${
                               isMine ? "right-0" : "left-0"
                             } -top-10 flex items-center gap-1 p-1 bg-surface-container border border-outline-variant rounded-full shadow-2xl animate-fade-in`}
@@ -1004,11 +1024,16 @@ function ChatPageContent() {
                               return (
                                 <button
                                   key={emoji}
+                                  type="button"
                                   onClick={() => toggleReaction(msg.id, emoji)}
-                                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] border ${hasReacted ? "bg-[#71d4ff]/20 border-[#71d4ff]/50" : "bg-[#1e2025] border-outline-variant/30 hover:bg-[#1e2025]/80"}`}
+                                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] border transition-colors ${
+                                    hasReacted
+                                      ? "bg-primary/20 border-primary/50 text-primary font-semibold"
+                                      : "bg-surface-container border-outline-variant/40 text-on-surface-variant hover:bg-surface-variant hover:text-on-surface"
+                                  }`}
                                 >
                                   <span>{emoji}</span>
-                                  <span className={hasReacted ? "text-[#71d4ff]" : "text-on-surface-variant"}>{count}</span>
+                                  <span>{count}</span>
                                 </button>
                               );
                             })}
