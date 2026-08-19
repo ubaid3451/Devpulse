@@ -519,16 +519,7 @@ export async function createGroupConversation(name: string, participantUsernames
 }
 
 export async function hideConversation(conversationId: string): Promise<{ message: string }> {
-  try {
-    return await apiDelete<{ message: string }>(`/chat/conversations/${conversationId}`);
-  } catch (err) {
-    try {
-      return await apiDelete<{ message: string }>(`/chat/${conversationId}`);
-    } catch (err2) {
-      console.error("Failed to delete conversation on server:", err2);
-      return { message: "hidden" };
-    }
-  }
+  return apiDelete<{ message: string }>(`/chat/conversations/${conversationId}`);
 }
 
 export async function markConversationRead(conversationId: string): Promise<{ marked_read: number }> {

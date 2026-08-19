@@ -182,11 +182,26 @@ function ChatPageContent() {
   const confirmDelete = async (conversationId: string) => {
     setDeletingId(conversationId);
     try {
-      await hideConversation(conversationId);
+      // 1. Immediately record in local state and localStorage so it never reappears on reload
+      setDeletedConvoIds((prev) => {
+        const next = new Set(prev);
+        next.add(conversationId);
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.setItem("devpulse_deleted_convos", JSON.stringify(Array.from(next)));
+          } catch {}
+        }
+        return next;
+      });
+
+      // 2. Remove from active conversations view
       setConversations((prev) => prev.filter((c) => c.conversation_id !== conversationId));
       if (activeConversationId === conversationId) {
         setActiveConversationId(null);
       }
+
+      // 3. Inform the backend
+      await hideConversation(conversationId);
     } catch (err) {
       console.error("Failed to delete conversation", err);
     } finally {
@@ -215,16 +230,36 @@ function ChatPageContent() {
   // Track processed message IDs to prevent double-decryption on WebSocket reconnect/replay
   const processedMessageIds = useRef<Set<string>>(new Set());
 
+  const [deletedConvoIds, setDeletedConvoIds] = useState<Set<string>>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("devpulse_deleted_convos");
+        return stored ? new Set(JSON.parse(stored)) : new Set();
+      } catch {
+        return new Set();
+      }
+    }
+    return new Set();
+  });
+
   const refreshConversations = () => {
     getConversations(myDeviceIdRef.current)
       .then(async (convos: ConversationResponse[]) => {
-        setConversations(convos);
+        let storedDeleted: Set<string> = new Set();
+        if (typeof window !== "undefined") {
+          try {
+            const raw = localStorage.getItem("devpulse_deleted_convos");
+            if (raw) storedDeleted = new Set(JSON.parse(raw));
+          } catch {}
+        }
+        const filteredConvos = convos.filter((c) => !storedDeleted.has(c.conversation_id));
+        setConversations(filteredConvos);
 
         if (!currentUser || !e2eeReady) return;
 
         const previews: Record<string, string> = {};
         await Promise.all(
-          convos.map(async (convo: ConversationResponse) => {
+          filteredConvos.map(async (convo: ConversationResponse) => {
             if (convo.is_group || !convo.last_message_id) return;
 
             const cached = getCachedMessagePlaintext(currentUser.id, convo.last_message_id);
@@ -519,6 +554,17 @@ function ChatPageContent() {
     setSearchQuery("");
     try {
       const res = await startDirectConversation(user.username);
+      // If user had previously deleted it, un-blacklist it
+      setDeletedConvoIds((prev) => {
+        const next = new Set(prev);
+        next.delete(res.conversation_id);
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.setItem("devpulse_deleted_convos", JSON.stringify(Array.from(next)));
+          } catch {}
+        }
+        return next;
+      });
       setActiveConversationId(res.conversation_id);
       refreshConversations();
     } catch (err: any) {
