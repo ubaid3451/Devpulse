@@ -23,6 +23,100 @@ import {
   markConversationRead,
 } from "@/lib/api";
 
+function renderFormattedMessage(text: string, isMine: boolean) {
+  // Regex to split by:
+  // 1. Code blocks: ```code```
+  // 2. Inline code: `code`
+  // 3. Bold: **text**
+  // 4. Italic: *text*
+  // 5. Links: [label](url)
+  const regex = /(```[\s\S]*?```|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
+  const parts = text.split(regex);
+
+  return parts.map((part, index) => {
+    if (!part) return null;
+
+    // Code block: ```code```
+    if (part.startsWith("```") && part.endsWith("```")) {
+      const code = part.slice(3, -3).replace(/^\n+|\n+$/g, "");
+      return (
+        <pre
+          key={index}
+          className={`my-1.5 p-2 rounded-lg font-mono text-[13px] overflow-x-auto border ${
+            isMine
+              ? "bg-black/20 border-white/20 text-white"
+              : "bg-surface-container-highest border-outline-variant/40 text-on-surface"
+          }`}
+        >
+          <code>{code}</code>
+        </pre>
+      );
+    }
+
+    // Inline code: `code`
+    if (part.startsWith("`") && part.endsWith("`")) {
+      const code = part.slice(1, -1);
+      return (
+        <code
+          key={index}
+          className={`px-1.5 py-0.5 rounded font-mono text-[13px] border ${
+            isMine
+              ? "bg-black/25 border-white/20 text-white"
+              : "bg-surface-container-highest border-outline-variant/40 text-primary"
+          }`}
+        >
+          {code}
+        </code>
+      );
+    }
+
+    // Bold: **text**
+    if (part.startsWith("**") && part.endsWith("**")) {
+      const content = part.slice(2, -2);
+      return (
+        <strong key={index} className="font-bold">
+          {content}
+        </strong>
+      );
+    }
+
+    // Italic: *text*
+    if (part.startsWith("*") && part.endsWith("*")) {
+      const content = part.slice(1, -1);
+      return (
+        <em key={index} className="italic">
+          {content}
+        </em>
+      );
+    }
+
+    // Link: [label](url)
+    if (part.startsWith("[") && part.includes("](") && part.endsWith(")")) {
+      const match = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (match) {
+        const [, label, url] = match;
+        const validUrl = url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
+        return (
+          <a
+            key={index}
+            href={validUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`underline font-semibold transition-opacity hover:opacity-80 inline-flex items-center gap-0.5 ${
+              isMine ? "text-white" : "text-primary"
+            }`}
+          >
+            {label}
+            <span className="material-symbols-outlined text-[13px] inline-block">open_in_new</span>
+          </a>
+        );
+      }
+    }
+
+    return <span key={index}>{part}</span>;
+  });
+}
+
 function ChatPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -53,6 +147,41 @@ function ChatPageContent() {
 
   useEffect(() => {
     requestNotificationPermission();
+  }, []);
+
+  // Close reaction picker or emoji picker on click outside or Escape key
+  useEffect(() => {
+    const handleDocumentClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      // If click is inside an EmojiPicker or a reaction button / emoji trigger button, do nothing
+      if (
+        target.closest(".epr-main") ||
+        target.closest("[data-emoji-trigger]") ||
+        target.closest("[data-reaction-btn]")
+      ) {
+        return;
+      }
+
+      setActiveReactionMsgId(null);
+      setShowEmojiPicker(false);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setActiveReactionMsgId(null);
+        setShowEmojiPicker(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleDocumentClick);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentClick);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, []);
 
   const confirmDelete = async (conversationId: string) => {
@@ -476,14 +605,21 @@ function ChatPageContent() {
     const end = textarea.selectionEnd;
     const text = inputText;
 
-    const selectedText = text.substring(start, end) || "text";
-    const newText = text.substring(0, start) + prefix + selectedText + suffix + text.substring(end);
+    const hasSelection = start !== end;
+    const selectedText = hasSelection ? text.substring(start, end) : "";
+    const placeholder = prefix === "[" ? "link text" : selectedText;
+    const insertContent = prefix + placeholder + suffix;
+    const newText = text.substring(0, start) + insertContent + text.substring(end);
 
     setInputText(newText);
 
     setTimeout(() => {
       textarea.focus();
-      textarea.setSelectionRange(start + prefix.length, start + prefix.length + selectedText.length);
+      if (hasSelection) {
+        textarea.setSelectionRange(start + prefix.length, start + prefix.length + placeholder.length);
+      } else {
+        textarea.setSelectionRange(start + prefix.length, start + prefix.length + placeholder.length);
+      }
     }, 0);
   };
 
@@ -834,6 +970,8 @@ function ChatPageContent() {
                         <div className="flex items-center gap-2">
                           {isMine && (
                             <button
+                              type="button"
+                              data-reaction-btn="true"
                               onClick={() => setActiveReactionMsgId(activeReactionMsgId === msg.id ? null : msg.id)}
                               className="opacity-0 group-hover:opacity-100 p-1 text-on-surface-variant hover:text-on-surface transition-opacity"
                             >
@@ -851,13 +989,17 @@ function ChatPageContent() {
                               <img src={msg.image_url} alt="Attachment" className="max-w-full rounded-lg mb-2 max-h-64 object-cover" />
                             )}
                             {msg.content ? (
-                              <div className="whitespace-pre-wrap text-[15px] leading-relaxed">{msg.content}</div>
+                              <div className="whitespace-pre-wrap text-[15px] leading-relaxed break-words">
+                                {renderFormattedMessage(msg.content, isMine)}
+                              </div>
                             ) : !msg.image_url ? (
                               <div className="whitespace-pre-wrap text-[15px] leading-relaxed opacity-75 italic">[Sent message]</div>
                             ) : null}
                           </div>
                           {!isMine && (
                             <button
+                              type="button"
+                              data-reaction-btn="true"
                               onClick={() => setActiveReactionMsgId(activeReactionMsgId === msg.id ? null : msg.id)}
                               className="opacity-0 group-hover:opacity-100 p-1 text-on-surface-variant hover:text-on-surface transition-opacity"
                             >
@@ -921,22 +1063,69 @@ function ChatPageContent() {
                   </div>
                 ) : (
                   <div className="bg-surface-container border border-outline-variant/40 rounded-xl overflow-hidden focus-within:border-primary/50 transition-colors">
-                    <div className="px-3 py-2 border-b border-outline-variant/20 flex gap-2 text-on-surface-variant relative">
-                      <button onClick={() => insertTextAtCursor("**", "**")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm">B</button>
-                      <button onClick={() => insertTextAtCursor("*", "*")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors font-bold text-sm italic">I</button>
-                      <button onClick={() => insertTextAtCursor("`", "`")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors text-sm">&lt; &gt;</button>
-                      <button onClick={() => insertTextAtCursor("[", "](url)")} className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"><span className="material-symbols-outlined text-[16px]">link</span></button>
+                    <div className="px-3 py-1.5 border-b border-outline-variant/20 flex items-center gap-1 text-on-surface-variant relative bg-surface-container-low/50">
                       <button
-                        onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                        className="hover:text-on-surface p-1 rounded hover:bg-surface-variant/50 transition-colors"
+                        type="button"
+                        onClick={() => insertTextAtCursor("**", "**")}
+                        title="Bold (**text**)"
+                        className="w-7 h-7 flex items-center justify-center rounded-md hover:text-on-surface hover:bg-surface-variant transition-colors font-bold text-sm"
                       >
-                        <span className="material-symbols-outlined text-[16px]">sentiment_satisfied</span>
+                        <span className="material-symbols-outlined text-[18px]">format_bold</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => insertTextAtCursor("*", "*")}
+                        title="Italic (*text*)"
+                        className="w-7 h-7 flex items-center justify-center rounded-md hover:text-on-surface hover:bg-surface-variant transition-colors font-bold text-sm italic"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">format_italic</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => insertTextAtCursor("`", "`")}
+                        title="Inline Code (`code`)"
+                        className="w-7 h-7 flex items-center justify-center rounded-md hover:text-on-surface hover:bg-surface-variant transition-colors text-sm"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">code</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => insertTextAtCursor("```\n", "\n```")}
+                        title="Code Block (```code```)"
+                        className="w-7 h-7 flex items-center justify-center rounded-md hover:text-on-surface hover:bg-surface-variant transition-colors text-sm"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">data_object</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => insertTextAtCursor("[", "](url)")}
+                        title="Link [label](url)"
+                        className="w-7 h-7 flex items-center justify-center rounded-md hover:text-on-surface hover:bg-surface-variant transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">link</span>
+                      </button>
+                      <div className="w-[1px] h-4 bg-outline-variant/30 mx-1" />
+                      <button
+                        type="button"
+                        data-emoji-trigger="true"
+                        onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                        title="Emoji Picker"
+                        className={`w-7 h-7 flex items-center justify-center rounded-md transition-colors ${
+                          showEmojiPicker
+                            ? "text-primary bg-primary/15"
+                            : "hover:text-on-surface hover:bg-surface-variant"
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[18px]">sentiment_satisfied</span>
                       </button>
 
                       {showEmojiPicker && (
-                        <div className="absolute bottom-full left-0 mb-2 z-30">
+                        <div className="absolute bottom-full left-0 mb-2 z-30 shadow-2xl">
                           <EmojiPicker
-                            onEmojiClick={(e) => setInputText((prev) => prev + e.emoji)}
+                            onEmojiClick={(e) => {
+                              setInputText((prev) => prev + e.emoji);
+                              setShowEmojiPicker(false);
+                            }}
                             theme={Theme.DARK}
                           />
                         </div>
