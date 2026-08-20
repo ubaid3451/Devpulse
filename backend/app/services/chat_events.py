@@ -210,6 +210,16 @@ async def handle_chat_message_event(db: Session, user: User, data: dict, sender_
         if row.recipient_user_id == user.id and row.recipient_device_id == sender_device_id:
             sent_to_sender = True
 
+    # Notify offline / online recipients of new message
+    from app.services.notification_service import create_notification
+    for recipient_id in other_participant_ids:
+        create_notification(
+            db=db,
+            recipient_id=recipient_id,
+            actor_id=user.id,
+            type="message",
+        )
+
     # Always ensure the active sending device receives a confirmation WS event
     # so the sender UI appends the sent message cleanly.
     if not sent_to_sender:

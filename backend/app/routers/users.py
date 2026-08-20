@@ -438,12 +438,26 @@ def toggle_follow(
     if existing_follow:
         db.delete(existing_follow)
         db.commit()
+        from app.services.notification_service import delete_notification_by_action
+        delete_notification_by_action(
+            db=db,
+            recipient_id=target_user.id,
+            actor_id=current_user.id,
+            type="follow",
+        )
         return {"status": "unfollowed"}
 
     if not target_user.is_private:
         new_follow = Follow(follower_id=current_user.id, following_id=target_user.id)
         db.add(new_follow)
         db.commit()
+        from app.services.notification_service import create_notification
+        create_notification(
+            db=db,
+            recipient_id=target_user.id,
+            actor_id=current_user.id,
+            type="follow",
+        )
         return {"status": "followed"}
 
     existing_request = db.execute(
@@ -456,6 +470,13 @@ def toggle_follow(
     if existing_request and existing_request.status == "pending":
         db.delete(existing_request)
         db.commit()
+        from app.services.notification_service import delete_notification_by_action
+        delete_notification_by_action(
+            db=db,
+            recipient_id=target_user.id,
+            actor_id=current_user.id,
+            type="follow_request",
+        )
         return {"status": "request_cancelled"}
 
     if existing_request:
@@ -464,6 +485,13 @@ def toggle_follow(
         db.add(FollowRequest(requester_id=current_user.id, target_id=target_user.id))
 
     db.commit()
+    from app.services.notification_service import create_notification
+    create_notification(
+        db=db,
+        recipient_id=target_user.id,
+        actor_id=current_user.id,
+        type="follow_request",
+    )
     return {"status": "requested"}
 
 
@@ -516,6 +544,14 @@ def accept_follow_request(
         db.add(Follow(follower_id=req.requester_id, following_id=current_user.id))
 
     db.commit()
+
+    from app.services.notification_service import create_notification
+    create_notification(
+        db=db,
+        recipient_id=req.requester_id,
+        actor_id=current_user.id,
+        type="follow",
+    )
     return {"status": "accepted"}
 
 

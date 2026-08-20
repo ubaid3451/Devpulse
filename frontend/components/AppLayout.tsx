@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
 import CreatePostModal from "@/components/CreatePostModal";
+import { getUnreadNotificationCount } from "@/lib/api";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -15,6 +16,22 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
   const router = useRouter();
   const { user, logout } = useAuth();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    getUnreadNotificationCount()
+      .then((res) => setUnreadNotifCount(res.unread_count))
+      .catch(() => {});
+
+    const interval = setInterval(() => {
+      getUnreadNotificationCount()
+        .then((res) => setUnreadNotifCount(res.unread_count))
+        .catch(() => {});
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [user]);
 
   async function handleLogout() {
     await logout();
@@ -25,12 +42,12 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
     { id: "home", label: "Home", icon: "home", href: "/feed" },
     { id: "explore", label: "Explore", icon: "explore", href: "/explore" },
     { id: "messages", label: "Messages", icon: "mail", href: "/chat" },
-    { id: "notifications", label: "Notifications", icon: "notifications", href: "/notifications" },
+    { id: "notifications", label: "Notifications", icon: "notifications", href: "/notifications", badge: unreadNotifCount },
     // Admin link only shows up for admin-role users. Added conditionally here
     // (rather than always rendered + hidden with CSS) so it never appears in
     // the DOM at all for regular users.
     ...(user?.role === "admin" || user?.role === "superadmin"
-      ? [{ id: "admin", label: "Admin", icon: "shield_person", href: "/admin" }]
+      ? [{ id: "admin", label: "Admin", icon: "shield_person", href: "/admin", badge: 0 }]
       : []),
   ];
 
@@ -76,14 +93,21 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
               <Link
                 key={item.id}
                 href={item.href}
-                className={`flex items-center gap-md px-md py-sm mb-xs rounded-sm transition-colors ${
+                className={`flex items-center justify-between px-md py-sm mb-xs rounded-sm transition-colors ${
                   activeNav === item.id
                     ? "text-primary font-bold border-l-4 border-primary bg-surface-variant -ml-[4px] pl-[12px]"
                     : "text-on-surface-variant hover:bg-surface-variant"
                 }`}
               >
-                <span className="material-symbols-outlined">{item.icon}</span>
-                <span className="font-body-base text-body-base">{item.label}</span>
+                <div className="flex items-center gap-md">
+                  <span className="material-symbols-outlined">{item.icon}</span>
+                  <span className="font-body-base text-body-base">{item.label}</span>
+                </div>
+                {Boolean(item.badge && item.badge > 0) && (
+                  <span className="px-2 py-0.5 text-xs font-bold bg-primary text-on-primary rounded-full">
+                    {item.badge! > 99 ? "99+" : item.badge}
+                  </span>
+                )}
               </Link>
             ))}
 
@@ -141,9 +165,16 @@ export default function AppLayout({ children, activeNav = "home" }: AppLayoutPro
           <Link
             key={item.id}
             href={item.href}
-            className={`flex flex-col items-center gap-1 ${activeNav === item.id ? "text-primary scale-105" : "text-on-surface-variant"} transition-transform`}
+            className={`relative flex flex-col items-center gap-1 ${activeNav === item.id ? "text-primary scale-105" : "text-on-surface-variant"} transition-transform`}
           >
-            <span className="material-symbols-outlined">{item.icon}</span>
+            <div className="relative">
+              <span className="material-symbols-outlined">{item.icon}</span>
+              {Boolean(item.badge && item.badge > 0) && (
+                <span className="absolute -top-1 -right-2 px-1.5 py-0.2 text-[10px] font-bold bg-primary text-on-primary rounded-full min-w-[16px] text-center">
+                  {item.badge! > 99 ? "99+" : item.badge}
+                </span>
+              )}
+            </div>
             <span className="font-label-caps text-label-caps">{item.label}</span>
           </Link>
         ))}

@@ -353,6 +353,17 @@ def add_comment(
     db.commit()
     db.refresh(comment)
 
+    # Trigger notification to post author
+    from app.services.notification_service import create_notification
+    create_notification(
+        db=db,
+        recipient_id=post.author_id,
+        actor_id=current_user.id,
+        type="comment",
+        post_id=post.id,
+        comment_id=comment.id,
+    )
+
     return comment
 
 
@@ -366,6 +377,8 @@ def toggle_like(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
+    from app.services.notification_service import create_notification, delete_notification_by_action
+
     existing_like = db.execute(
         select(Like).where(Like.post_id == post_id, Like.user_id == current_user.id)
     ).scalar_one_or_none()
@@ -374,11 +387,25 @@ def toggle_like(
         db.delete(existing_like)
         db.commit()
         liked = False
+        delete_notification_by_action(
+            db=db,
+            recipient_id=post.author_id,
+            actor_id=current_user.id,
+            type="like",
+            post_id=post.id,
+        )
     else:
         new_like = Like(post_id=post_id, user_id=current_user.id)
         db.add(new_like)
         db.commit()
         liked = True
+        create_notification(
+            db=db,
+            recipient_id=post.author_id,
+            actor_id=current_user.id,
+            type="like",
+            post_id=post.id,
+        )
 
     likes_count = db.execute(
         select(func.count(Like.id)).where(Like.post_id == post_id)

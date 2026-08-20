@@ -606,3 +606,44 @@ export async function updateAdminUserPermissions(userId: string, permissions: st
   }
   return res.json();
 }
+
+// ── Notifications API ────────────────────────────────────────────────────────
+
+export interface NotificationItem {
+  id: string;
+  recipient_id: string;
+  actor_id: string;
+  actor: {
+    id: string;
+    username: string;
+    full_name: string | null;
+    avatar_url: string | null;
+  };
+  type: "like" | "comment" | "follow" | "follow_request" | "message";
+  post_id: string | null;
+  comment_id: string | null;
+  post_snippet: string | null;
+  comment_snippet: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+export async function getNotifications(skip = 0, limit = 50): Promise<NotificationItem[]> {
+  return apiGet<NotificationItem[]>("/notifications", { skip, limit });
+}
+
+export async function getUnreadNotificationCount(): Promise<{ unread_count: number }> {
+  return apiGet<{ unread_count: number }>("/notifications/unread-count");
+}
+
+export async function markNotificationAsRead(id: string): Promise<{ status: string }> {
+  return apiPatch<{ status: string }>(`/notifications/${id}/read`);
+}
+
+export async function markAllNotificationsAsRead(): Promise<{ status: string; message: string }> {
+  return apiPost<{ status: string; message: string }>("/notifications/read-all");
+}
+
+export async function deleteNotification(id: string): Promise<{ status: string; message: string }> {
+  return apiDelete<{ status: string; message: string }>(`/notifications/${id}`);
+}

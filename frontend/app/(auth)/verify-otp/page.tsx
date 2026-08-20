@@ -87,7 +87,7 @@ function VerifyOTPContent() {
         setSuccess(true);
         setTimeout(() => router.push("/feed"), 1500);
       } catch (err) {
-        setError(err instanceof ApiError ? err.detail : "Verification failed.");
+        setError((err instanceof ApiError && err.detail) || "Verification failed.");
       } finally {
         setIsVerifying(false);
       }
@@ -104,7 +104,7 @@ function VerifyOTPContent() {
       setDigits(Array(OTP_LENGTH).fill(""));
       inputRefs.current[0]?.focus();
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not resend code.");
+      setError((err instanceof ApiError && err.detail) || "Could not resend code.");
     } finally {
       setIsResending(false);
     }

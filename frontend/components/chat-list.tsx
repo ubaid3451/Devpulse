@@ -97,7 +97,7 @@ export function ChatList({
         onSelectConversation("");
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Couldn't delete chat. Try again.");
+      setError((err instanceof ApiError && err.detail) || "Couldn't delete chat. Try again.");
     } finally {
       setDeletingId(null);
       setPendingDeleteId(null);
